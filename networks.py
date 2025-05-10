@@ -1,4 +1,28 @@
+import torch
 import torch.nn as nn
+from torch import Tensor
+
+
+class LinearBlock(nn.Module):
+    def __init__(self,
+                 in_dim: int,
+                 out_dim: int,
+                 device: torch.device,
+                 activation: nn.Module = nn.ReLU,
+                 normalization: nn.Module = None,
+                 ):
+        super().__init__()
+        self.norm = normalization
+        self.activation = activation
+        self.block = nn.Sequential(
+            normalization if normalization else nn.Identity(),
+            nn.Linear(in_dim, out_dim),
+            activation() if activation else nn.Identity(),
+        )
+        self.to(device)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.block(x)
 
 
 class FeedForwardNetwork(nn.Module):
