@@ -111,57 +111,6 @@ class Agent(AgentConfig):
             episodes:    maximum number of training episodes
             play_time:   maximum number of actions per episode
 
-        Return:
-            list: scores, list: loss, int: last_episode
-        '''
-
-        # print statement returns currently used variables
-        print('| Variables during this run |')
-        print(f'\tEpisodes: {episodes}')
-        print(f'\tPlay time: {play_time}')
-        # TODO: redo this section
-        # for k, v in self.config.__dict__:
-        #     print(f'\t{k.upper()}: {v}')
-
-        scores, loss = [], []
-        last_scores, last_loss = deque(maxlen=100), deque(maxlen=100)
-
-        for episode in range(episodes):
-            state, *_ = environment.reset()
-            score = 0
-            for time in range(play_time):
-                # act on primary state and get best action from NN
-                action = self.get_action(state)
-                # take a step in the environment according to the chosen action
-                next_state, reward, terminated, truncated, _ = environment.step(action)
-                self.memorize(state, action, reward, next_state, terminated)
-                state = next_state
-                score += reward
-                if terminated or truncated:
-                    break
-                self.update_epsilon(current_episode=episode)
-
-            scores.append(score)
-            loss.append(int(self.loss))
-            last_scores.append(score)
-            last_loss.append(int(self.loss))
-
-            if episode % 50 == 0:
-                print(f'Episode #{episode}:'
-                      f'\n\tAverage score: {np.mean(last_scores):.2f}'
-                      f'\n\tAverage loss: {np.mean(last_loss):.2f}')
-                if self.eps > self.eps_end:
-                    print(f'\tEpsilon: {self.eps:.2f}')
-
-            if np.mean(last_scores) >= 200.0:
-                print(f'Environment solved! Training done in {episode} episodes.')
-                print(f'\n\tAverage loss: {np.mean(last_loss):.2f}')
-                torch.save(self.qnet_local.state_dict(), f'./diagnostics/state_dicts/state_dict.pt')
-                environment.close()
-                break
-
-        return scores, loss, episode
-
-    #TODO: add a evaluation mode
-    def eval(self):
-        pass
+    def load_state_dict(self, path_local, path_target):
+        self.qnet_local.load_state_dict(torch.load(path_local))
+        self.qnet_target.load_state_dict(torch.load(path_target))
