@@ -101,15 +101,11 @@ class Agent(AgentConfig):
         new_eps = slope * current_episode + self.eps_start
         self.eps = max(self.eps_end, new_eps)
 
-    def train(self, environment: gym.Env, episodes: int = 1500, play_time: int = 1000):
-        '''
-        Initializes the agents' training loop.
-
-        Args:
-            hparams:     containing hyperparameters
-            environment: initialized gym(nasium) game environment
-            episodes:    maximum number of training episodes
-            play_time:   maximum number of actions per episode
+    def save_state_dict(self, path_to_dir: os.PathLike = './model_params'):
+        path = os.path.join(path_to_dir, "local.pt")
+        torch.save(self.qnet_local.state_dict(), path)
+        path = os.path.join(path_to_dir, "target.pt")
+        torch.save(self.qnet_target.state_dict(), path)
 
     def load_state_dict(self, path_local, path_target):
         self.qnet_local.load_state_dict(torch.load(path_local))
