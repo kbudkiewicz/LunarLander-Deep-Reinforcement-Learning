@@ -40,7 +40,14 @@ class Agent(AgentConfig):
         self.s_next_tens = torch.tensor(np.zeros((self.batch_size, 8))).float()
         self.term_tens = torch.tensor(range(self.batch_size)).long()
 
-    def get_action(self, observation: torch.Tensor):
+        # pre-allocation
+        self.s_tens = torch.zeros([self.batch_size, 8], device=self.device).float()
+        self.s_next_tens = torch.zeros_like(self.s_tens, device=self.device)
+        self.a_tens = torch.tensor(range(self.batch_size), device=self.device).unsqueeze(1).long()
+        self.r_tens = torch.tensor(range(self.batch_size), device=self.device)
+        self.term_tens = torch.tensor(range(self.batch_size), device=self.device)
+
+    def __call__(self, observation: np.array) -> np.array:
         """
         Return the best or a random action from the environment given some observation. The probability of getting
         the best vs. a random action is given by the value of :math:`\epsilon` (see `Epsilon-Greedy action selection`_).
