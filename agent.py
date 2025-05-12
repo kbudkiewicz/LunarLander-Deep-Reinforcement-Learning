@@ -69,8 +69,14 @@ class Agent(AgentConfig):
             return torch.randint(size=[1], low=0, high=3).item()
 
     def memorize(self, *args):
-        self.memory.remember(*args)  # input: s, a, r, next_s, terminated
-        self.t_step = self.t_step + 1
+        """
+        Save SARS to agent's ``ReplayMemory``.
+
+        Args:
+            *args: A vector containing (s, a, r, next_s, terminated).
+        """
+        self.memory.remember(*args)
+        self.t_step += 1
         if (self.t_step % self.net_update_freq == 0) and (self.memory.__len__() >= self.batch_size):
             self.update_net()
 
