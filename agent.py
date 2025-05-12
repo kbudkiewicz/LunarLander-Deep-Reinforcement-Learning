@@ -62,7 +62,13 @@ class Agent(AgentConfig):
         self.memory.remember(*args)  # input: s, a, r, next_s, terminated
         self.t_step = self.t_step + 1
         if (self.t_step % self.net_update_freq == 0) and (self.memory.__len__() >= self.batch_size):
-            self.update_net(self.memory.get_sample())
+            self.update_net()
+
+    def backprop(self, x0: Tensor, x1: Tensor,
+                 criterion: torch.nn.Module = torch.nn.MSELoss(),
+                 do_return: bool = True) -> Tensor | None:
+        """
+        Perform a backpropagation step.
 
     def update_net(self, exp: namedtuple):
         # unpack memories into a tensor/vector with states, actions, or rewards
