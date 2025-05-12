@@ -27,18 +27,17 @@ class ReplayMemory(object):
 
 
 class Agent(AgentConfig):
-    def __init__(self):
+    def __init__(self, device=None):
         super().__init__()
+        if device:
+            self.device = device
+        else:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.eps = self.eps_start
         self.qnet_local = FeedForwardNetwork(8,64,64,4)
         self.qnet_target = FeedForwardNetwork(8,64,64,4).eval()
         self.optimizer = optim.Adam(self.qnet_local.parameters(), self.lr)
         self.memory = ReplayMemory(self.memory_size, self.batch_size)
-        self.s_tens = torch.tensor(np.zeros((self.batch_size, 8))).float()
-        self.a_tens = torch.tensor(range(self.batch_size)).unsqueeze(1).long()
-        self.r_tens = torch.tensor(range(self.batch_size)).float()
-        self.s_next_tens = torch.tensor(np.zeros((self.batch_size, 8))).float()
-        self.term_tens = torch.tensor(range(self.batch_size)).long()
 
         # pre-allocation
         self.s_tens = torch.zeros([self.batch_size, 8], device=self.device).float()
