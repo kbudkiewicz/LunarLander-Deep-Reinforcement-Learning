@@ -86,7 +86,22 @@ class Agent(AgentConfig):
         """
         Perform a backpropagation step.
 
-    def update_net(self, exp: namedtuple):
+        Args:
+            x0 (Tensor): Predicted values
+            x1 (Tensor): Actual values
+            criterion (Callable): Loss function
+            do_return (bool): Return the loss value. Default is True.
+        """
+        self.optimizer.zero_grad()
+        # torch.nn.utils.clip_grad_value_(self.qnet_local.parameters(), 100)
+        loss = criterion(x0, x1)
+        loss.backward()
+        self.optimizer.step()
+
+        if do_return:
+            return loss.item()
+
+    def update_net(self):
         # unpack memories into a tensor/vector with states, actions, or rewards
         # attach an argument of named tuple from each memory
         for i in range(len(exp)):
