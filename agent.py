@@ -88,11 +88,7 @@ class Agent(AgentConfig):
         q_target = self.r_tens + self.gamma * torch.max(q_target_next, dim=1)[0] * (1 - self.term_tens)  # q_target
         q_expected = self.qnet_local(self.s_tens).gather(1, self.a_tens).squeeze()  # current q
 
-        # loss calculation and backpropagation
-        self.loss = F.mse_loss(q_expected, q_target)
-        self.loss.backward()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
+        self.loss = self.backprop(q_local, q_target)
 
         # update network parameters
         for target_param, local_param in zip(self.qnet_target.parameters(), self.qnet_local.parameters()):
