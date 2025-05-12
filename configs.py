@@ -1,12 +1,10 @@
 class AgentConfig:
-    '''
+    """
     Hyperparameters for the RL agent. Contains both agent, as well as network hyperparameters.
-    '''
+    """
     state_space: int = 8
     action_space: int = 4
     memory_size: int = 100_000
-    episodes: int = 1_500
-    play_time: int = 1_000
     t_step: int = 0
     batch_size: int = 64
     tau: float = 2.5e-3     # soft parameter update constant
@@ -15,4 +13,5 @@ class AgentConfig:
     net_update_freq: int = 6
     eps_start: float = 0.7  # starting epsilon value
     eps_end: float = 0.05   # final epsilon value
-    eps_term: int = 500     # episode # at which eps_end is reached4
+    eps_term: int = 200     # episode # at which eps_end is reached4
+    loss: float | None = None

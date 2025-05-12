@@ -44,6 +44,9 @@ class Agent(AgentConfig):
         """
         Return the best or a random action from the environment given some observation. The probability of getting
         the best vs. a random action is given by the value of :math:`\epsilon` (see `Epsilon-Greedy action selection`_).
+
+        The forward pass is performed with no_grad().
+
         :param observation: a vector describing the current state of the environment
         :return:    Action [int]
 
@@ -95,7 +98,7 @@ class Agent(AgentConfig):
         for target_param, local_param in zip(self.qnet_target.parameters(), self.qnet_local.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1. - self.tau) * target_param.data)
 
-    def update_epsilon(self, current_episode):
+    def update_epsilon(self, current_episode: int) -> None:
         """
         Calculates the new :math:`\epsilon` value for each successive :code:`episode`. This function is equivalent to
         a learning rate scheduler.
