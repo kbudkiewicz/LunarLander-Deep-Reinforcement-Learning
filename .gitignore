@@ -1,1 +1,5 @@
-/TESTS
+# files
+_*
+
+# dirs
+/tests
