@@ -39,6 +39,8 @@ class FeedForwardNetwork(nn.Module):
 
         self.net = nn.Sequential()
         for idx in range(len(dims) - 1):
+            if idx == len(dims) - 2:
+                activation = nn.Identity
             self.net.append(
                 LinearBlock(
                     dims[idx], dims[idx + 1],
@@ -51,7 +53,12 @@ class FeedForwardNetwork(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
-        self.net = nn.Sequential(*self.module_list)
+    @NotImplementedError
+    def backprop(self, x0: Tensor, x1: Tensor, loss_func: nn.Module = nn.MSELoss, do_return: bool = True) -> Tensor:
+        self.optimizer.zero_grad()
+        loss = loss_func(x0, x1)
+        loss.backward()
+        self.optimizer.step()
 
-    def forward(self, state):
-        return self.net(state)
+        if do_return:
+            return loss
