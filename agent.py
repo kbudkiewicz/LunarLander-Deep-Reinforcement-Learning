@@ -77,16 +77,16 @@ class Agent(AgentConfig):
         # unpack memories into a tensor/vector with states, actions, or rewards
         # attach an argument of named tuple from each memory
         for i in range(len(exp)):
-            self.s_tens[i] = torch.tensor(exp[i].s)
-            self.a_tens[i] = torch.tensor(exp[i].a)
-            self.r_tens[i] = torch.tensor(exp[i].r)
-            self.s_next_tens[i] = torch.tensor(exp[i].next_s)
-            self.term_tens[i] = torch.tensor(exp[i].term)
+            self.s_tens[i] = torch.tensor(exp[i].s, device=self.device)
+            self.a_tens[i] = torch.tensor(exp[i].a, device=self.device)
+            self.r_tens[i] = torch.tensor(exp[i].r, device=self.device)
+            self.s_next_tens[i] = torch.tensor(exp[i].next_s, device=self.device)
+            self.term_tens[i] = torch.tensor(exp[i].term, device=self.device)
 
         # Bellman equation. Calculating q_target and and current q_value
-        q_target_next = self.qnet_target(self.s_next_tens)  # get q_values of next states
-        q_target = self.r_tens + self.gamma * torch.max(q_target_next, dim=1)[0] * (1 - self.term_tens)  # q_target
-        q_expected = self.qnet_local(self.s_tens).gather(1, self.a_tens).squeeze()  # current q
+        q = self.qnet_target(self.s_next_tens)  # get q_values of next states
+        q_target = self.r_tens + self.gamma * torch.max(q, dim=1)[0] * (1 - self.term_tens)  # q_target
+        q_local = self.qnet_local(self.s_tens).gather(1, self.a_tens).squeeze()  # current q
 
         self.loss = self.backprop(q_local, q_target)
 
