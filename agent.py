@@ -1,15 +1,15 @@
+import os
 import random
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torch.optim as optim
-import gym
+from torch import Tensor
 from configs import AgentConfig
 from collections import deque, namedtuple
 from networks import FeedForwardNetwork
 
 # defining memory instance
 memory = namedtuple('Memory', ('s', 'a', 'r', 'next_s', 'term'))
+
 
 class ReplayMemory(object):
     def __init__(self, memory_size: int, batch_size: int):
