@@ -54,12 +54,12 @@ class Agent(AgentConfig):
         """
 
         if random.random() > self.eps:
-            state = torch.from_numpy(observation).float()
+            observation = torch.from_numpy(observation).requires_grad_(False).to(self.device)
             with torch.no_grad():
-                action_values = self.qnet_local.forward(state)
-            return np.argmax(action_values.detach().numpy())
+                action_values = self.qnet_local.forward(observation)
+            return torch.argmax(action_values).cpu().detach().numpy()
         else:
-            return random.randint(0, 3)
+            return torch.randint(size=[1], low=0, high=3).item()
 
     def memorize(self, *args):
         self.memory.remember(*args)  # input: s, a, r, next_s, terminated
