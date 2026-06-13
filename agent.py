@@ -1,11 +1,15 @@
 import os
 import random
-import numpy as np
+import copy
 import torch
+import torch.nn as nn
+import numpy as np
+
+from abc import abstractmethod
+from typing import Union, Tuple
 from torch import Tensor
-from configs import AgentConfig
 from collections import deque, namedtuple
-from networks import FeedForwardNetwork
+from nn import FeedForwardNetwork
 
 # defining memory instance
 memory = namedtuple('Memory', ('s', 'a', 'r', 'next_s', 'term'))
@@ -16,35 +20,57 @@ class ReplayMemory(object):
         self.memory = deque(maxlen=memory_size)
         self.batch_size = batch_size
 
-    def remember(self, *args):
+    def remember(self, *args) -> None:
         self.memory.append(memory(*args))
 
-    def get_sample(self):
-        return random.sample(self.memory, self.batch_size)
+    def get_sample(self, device) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        samples = random.sample(self.memory, self.batch_size)
+        states, actions, rewards, states_new, flags = map(np.array, zip(*samples))
+        states = torch.tensor(states, device=device, dtype=torch.float)
+        rewards = torch.tensor(rewards, device=device, dtype=torch.float)
+        states_new = torch.tensor(states_new, device=device, dtype=torch.float)
+        flags = torch.tensor(flags, device=device, dtype=torch.long)
+        actions = torch.tensor(actions, device=device, dtype=torch.long).unsqueeze(1)
 
-    def __len__(self):
+        return states, actions, rewards, states_new, flags
+
+    def __len__(self) -> int:
         return len(self.memory)
 
 
-class Agent(AgentConfig):
-    def __init__(self, device=None):
-        super().__init__()
-        if device:
-            self.device = device
-        else:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.eps = self.eps_start
-        self.qnet_local = FeedForwardNetwork(8,64,64,4)
-        self.qnet_target = FeedForwardNetwork(8,64,64,4).eval()
-        self.optimizer = optim.Adam(self.qnet_local.parameters(), self.lr)
-        self.memory = ReplayMemory(self.memory_size, self.batch_size)
+class AgentConfig:
+    """
+    Hyperparameters for the RL agent. Contains both agent, as well as network hyperparameters.
+    """
+    state_space: int = 8
+    action_space: int = 4
+    memory_size: int = 100_000
+    t_step: int = 0
+    batch_size: int = 64
+    tau: float = 2.5e-3     # soft parameter update constant
+    gamma: float = 0.99     # discount factor
+    lr: float = 1e-3
+    net_update_freq: int = 6
+    eps_start: float = 0.7  # starting epsilon value
+    eps_end: float = 0.05   # final epsilon value
+    eps_term: int = 200     # episode # at which eps_end is reached4
+    loss: float = float('inf')
 
-        # pre-allocation
-        self.s_tens = torch.zeros([self.batch_size, 8], device=self.device).float()
-        self.s_next_tens = torch.zeros_like(self.s_tens, device=self.device)
-        self.a_tens = torch.tensor(range(self.batch_size), device=self.device).unsqueeze(1).long()
-        self.r_tens = torch.tensor(range(self.batch_size), device=self.device)
-        self.term_tens = torch.tensor(range(self.batch_size), device=self.device)
+
+class Agent(AgentConfig):
+    def __init__(
+        self,
+        *dims,
+        device,
+    ):
+        super().__init__()
+        self.eps = self.eps_start
+        # FIXME: replacing local and target with module and its deepcopy breaks the agent
+        self.qnet_local = FeedForwardNetwork(*dims, device=device)
+        self.qnet_target = FeedForwardNetwork(*dims, device=device).eval()
+        self.device = device
+        self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr)
+        self.memory = ReplayMemory(self.memory_size, self.batch_size)
 
     def __call__(self, observation: np.array) -> np.array:
         """
@@ -60,14 +86,14 @@ class Agent(AgentConfig):
         """
 
         if random.random() > self.eps:
-            observation = torch.from_numpy(observation).requires_grad_(False).to(self.device)
             with torch.no_grad():
-                action_values = self.qnet_local.forward(observation)
-            return torch.argmax(action_values).cpu().detach().numpy()
+                observation = torch.from_numpy(observation).to(self.device)
+                action_values = self.qnet_local(observation)
+                return torch.argmax(action_values).item()
         else:
-            return torch.randint(size=[1], low=0, high=3).item()
+            return random.randint(0, 2)
 
-    def memorize(self, *args):
+    def memorize(self, *args) -> Union[float, None]:
         """
         Save SARS to agent's ``ReplayMemory``.
 
@@ -77,61 +103,71 @@ class Agent(AgentConfig):
         self.memory.remember(*args)
         self.t_step += 1
         if (self.t_step % self.net_update_freq == 0) and (self.memory.__len__() >= self.batch_size):
-            self.update_net()
+            loss = self.update_net()
+            return loss
+        return None
 
-    def backprop(self, x0: Tensor, x1: Tensor,
-                 criterion: torch.nn.Module = torch.nn.MSELoss(),
-                 do_return: bool = True) -> Tensor | None:
+    def backprop(
+        self,
+        predicted: Tensor,
+        target: Tensor,
+        criterion: torch.nn.Module = torch.nn.MSELoss(),
+    ) -> Union[float]:
         """
         Perform a backpropagation step.
 
         Args:
-            x0 (Tensor): Predicted values
-            x1 (Tensor): Actual values
+            predicted (Tensor): Predicted values
+            target (Tensor): Actual values
             criterion (Callable): Loss function
             do_return (bool): Return the loss value. Default is True.
         """
         self.optimizer.zero_grad()
-        # torch.nn.utils.clip_grad_value_(self.qnet_local.parameters(), 100)
-        loss = criterion(x0, x1)
+        torch.nn.utils.clip_grad_norm_(self.qnet_local.parameters(), max_norm=1.)
+        loss = criterion(predicted, target)
         loss.backward()
         self.optimizer.step()
+        return loss.item()
 
-        if do_return:
-            return loss.item()
+    @abstractmethod
+    def policy_update(
+        self,
+        sars: Tuple[Tensor, ...]
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """User-defined function to calculate the Q-values.
 
-    def update_net(self):
-        # unpack memories into a tensor/vector with states, actions, or rewards
-        # attach an argument of named tuple from each memory
-        for i in range(len(exp)):
-            self.s_tens[i] = torch.tensor(exp[i].s, device=self.device)
-            self.a_tens[i] = torch.tensor(exp[i].a, device=self.device)
-            self.r_tens[i] = torch.tensor(exp[i].r, device=self.device)
-            self.s_next_tens[i] = torch.tensor(exp[i].next_s, device=self.device)
-            self.term_tens[i] = torch.tensor(exp[i].term, device=self.device)
+        .. Args::
+            - sars (Tuple of Tensor): Tuple of batched State, Action, Reward, State'
+        """
 
-        # Bellman equation. Calculating q_target and and current q_value
-        q = self.qnet_target(self.s_next_tens)  # get q_values of next states
-        q_target = self.r_tens + self.gamma * torch.max(q, dim=1)[0] * (1 - self.term_tens)  # q_target
-        q_local = self.qnet_local(self.s_tens).gather(1, self.a_tens).squeeze()  # current q
+    def update_net(self) -> float:
+        state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
 
-        self.loss = self.backprop(q_local, q_target)
+        # Use Bellman equation to calculate the Q-values
+        q = self.qnet_target(state_new)
+        q_target = reward + self.gamma * torch.max(q, dim=1)[0] * (1 - flags)  # q_target
+        q_local = self.qnet_local(state).gather(1, action).squeeze()  # current q
+        loss = self.backprop(q_local, q_target)
 
-        # update network parameters
+        # soft parameter update
         for target_param, local_param in zip(self.qnet_target.parameters(), self.qnet_local.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1. - self.tau) * target_param.data)
 
-    def update_epsilon(self, current_episode: int) -> None:
-        """
-        Calculates the new :math:`\epsilon` value for each successive :code:`episode`. This function is equivalent to
-        a learning rate scheduler.
+        return loss
 
-        Args:
+    def update_epsilon(self, epoch: int) -> None:
+        r"""Calculates a new :math:`\epsilon` for each successive epoch following a predefined rate schedule.
+
+        .. Args::
             current_episode: current training episode
+
+        .. Return::
+            loss (float)
         """
         slope = (self.eps_end - self.eps_start) / self.eps_term
-        new_eps = slope * current_episode + self.eps_start
+        new_eps = slope * epoch + self.eps_start
         self.eps = max(self.eps_end, new_eps)
+        print(f"Epsilon: {self.eps:.4f}")
 
     def save_state_dict(self, path_to_dir: os.PathLike = './model_params'):
         path = os.path.join(path_to_dir, "local.pt")

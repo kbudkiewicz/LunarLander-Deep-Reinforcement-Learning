@@ -1,60 +1,166 @@
+import argparse
 import gym
-from tqdm import tqdm
-from numpy import mean
+import torch
+import mlflow
+import pynvml
+import platform
+import numpy as np
+
+# Standard library
 from collections import deque
+from typing import Optional, Tuple, Union
+
+# Libraries
+# External
+from git import Repo
+from mlflow.tracking import MlflowClient
+from tqdm import tqdm
+
+# Internal
 from agent import Agent
+from nn import FeedForwardNetwork
+from plotting import plot_loss_curve
 
 
-def train(training_episodes: int = 800, play_time: int = 1000):
+def get_nvml_info() -> dict:
+    try:
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        return {
+            'cuda.version': pynvml.nvmlSystemGetCudaDriverVersion_v2(),
+            'cuda.driver': pynvml.nvmlSystemGetDriverVersion(),
+            'gpu.count': pynvml.nvmlDeviceGetCount(),
+            'gpu.name': pynvml.nvmlDeviceGetName(handle),
+            'gpu.vram_mb': int(pynvml.nvmlDeviceGetMemoryInfo(handle).total / 1e6),
+            'gpu.multiprocessor_count': pynvml.nvmlDeviceGetNumGpuCores(handle),
+        }
+    except pynvml.NVMLError as e:
+        print(f"[WARNING] NVMLError: {e}")
+        return {}
+    finally:
+        pynvml.nvmlShutdown()
+
+
+def train(
+    agent,
+    epochs: int,
+    n_actions: int = 800,
+) -> Tuple[bool, float]:
+    """Train a reinforcement learning agent in a gym environment.
+
+    .. Args::
+        - n_epochs (int): Number of epochs to train the agent.
+        - n_actions (int): Number of actions available in the environment.
+        - device (torch.device): Device used for training.
+
+    .. Return::
+        - None
+    """
     env = gym.make('LunarLander-v2')
+    mlflow.log_param('environment', 'LunarLander-v2')
     print('Environment initialized.')
-    agent = Agent()
-    print('Agent initialized.')
-    print(f'Current device: {agent.device.upper()}\n')
 
-    metrics = {
-        'total_scores': [],
-        'total_losses': [],
-        'moving_scores': deque(maxlen=100),
-        'moving_losses': deque(maxlen=100),
-    }
+    epochs_ = tqdm(range(epochs), total=epochs, desc='Training Agent')
+    moving_score = deque(maxlen=100)
 
-    training_loop = tqdm(range(training_episodes), total=training_episodes, desc='Training Agent')
-    for episode in training_loop:
+    for epoch in epochs_:
         score = 0
         state, _ = env.reset()
-        for _ in range(play_time):
+        for _ in range(n_actions):
             action = agent(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
-            agent.memorize(state, action, reward, next_state, terminated)
+            loss = agent.memorize(state, action, reward, next_state, terminated)
             state = next_state
             score += reward
             if terminated or truncated:
                 break
-            agent.update_epsilon(current_episode=episode)
+            agent.update_epsilon(epoch=epoch)
 
-        for k in metrics.keys():
-            if 'scores' in k:
-                metrics[k].append(score)
-            elif 'loss' in k:
-                metrics[k].append(agent.loss)
-            else:
-                raise KeyError(f'Unknown metrics key: {k}')
+        moving_score.append(score)
+        average_score = np.mean(moving_score)
+        epochs_.set_postfix(average_score=f'{average_score:.2f}')
 
-        avg_score, avg_loss = mean(metrics['moving_scores']), mean(metrics['moving_losses'])
-        if episode >= 50 and episode % 50 == 0:
-            print(f'\nEpisode #{episode}:\n'
-                  f'\tAverage score: {avg_score:.2f}\n'
-                  f'\tAverage loss: {avg_loss:.2f}')
-            if agent.eps > agent.eps_end:
-                print(f'\tEpsilon: {agent.eps:.2f}')
+        mlflow.log_metric('total_score', score, step=epoch)
+        mlflow.log_metric('average_score', np.mean(moving_score), step=epoch)
+        if isinstance(loss, float):
+            mlflow.log_metric('loss', loss, step=epoch)
 
-        if avg_score >= 200.0:
-            agent.save_state_dict()
-            print(f'Environment solved! Training done in {episode} episodes. Average loss: {avg_loss:.2f}')
+        if average_score >= 200.0:
+            print(f'[INFO] Environment solved! Training done in {epoch} epochs.')
             env.close()
-            break
+            return True, epoch
+
+    print(f'Environment could not be solved within {epochs} epochs.')
+    env.close()
+    return False, float('inf')
 
 
 if __name__ == '__main__':
-    train()
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
+    argparser.add_argument('-d', '--dims', type=tuple, default=(8, 128, 128, 64, 4), required=False)
+    argparser.add_argument('-D', '--device', type=str)
+    argparser.add_argument('-L', '--log', type=bool, default=True)
+    argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction)
+    argparser.add_argument('--experiment-name', type=str, default='LunarLander_v2')
+    argparser.add_argument('--uri', type=str, default=None)
+    args = argparser.parse_args()
+
+    # neural network and agent setup
+    if args.device is not None:
+        device = args.device
+    else:
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    model = FeedForwardNetwork(*args.dims, device=device)
+    agent = Agent(*args.dims, device=device)
+
+    if args.log:
+        # check server connection
+        if isinstance(args.uri, str):
+            mlflow.set_tracking_uri(args.uri)
+        if mlflow.active_run():
+            print("[INFO] Active run detected. Ending run...")
+            mlflow.end_run()
+
+        mlflow.set_experiment(args.experiment_name)
+        run = mlflow.start_run(log_system_metrics=args.log_system_metrics)
+        client = MlflowClient()
+        RUN_ID = str(client.get_run(run.info.run_id))
+
+        if args.log_system_metrics:
+            mlflow.enable_system_metrics_logging()
+            mlflow.log_params(get_nvml_info())
+        mlflow.log_param('epochs', args.epochs)
+        mlflow.log_param('net.type', agent.qnet_target.name)
+        mlflow.log_param('net.param_count', agent.qnet_target.parameter_count)
+        mlflow.log_param('net.dims', args.dims)
+        mlflow.log_param('net.layers', len(args.dims))
+        mlflow.log_param('net.device', device)
+        mlflow.log_param('agent.type', agent.agent_type)
+
+        mlflow.set_tag('python.version', platform.python_version())
+        mlflow.set_tag('gym.version', gym.__version__)
+        with Repo('.').config_reader() as cfg:
+            mlflow.set_tag('git.user', cfg.get_value('user', 'name'))
+            mlflow.set_tag('git.email', cfg.get_value('user', 'email'))
+
+    try:
+        code, epochs = train(agent=agent, epochs=args.epochs)
+    except KeyboardInterrupt:
+        mlflow.log_param('KeyboardInterrupt', True)
+        epochs = 0
+        code = False
+
+    if args.log:
+        mlflow.log_param('training_successful', code)
+        mlflow.log_param('total_epochs', epochs)
+
+        # save models and their params only if the environment was solved
+        if code:
+            mlflow.pytorch.log_model(agent.qnet_local, name=agent.qnet_local.name, model_type='dqn')
+            mlflow.pytorch.log_model(agent.qnet_target, name=agent.qnet_target.name, model_type='dqn')
+
+        mlflow.end_run()
+
+    exit(code=not code)

@@ -1,5 +1,17 @@
-# files
-_*
-
 # dirs
+.idea
+.venv
+/artifacts
 /tests
+/mlruns
+/__pycache__
+
+# formats
+_*
+.env
+.txt
+.png
+.svg
+.jpeg
+.jpg
+.csv
