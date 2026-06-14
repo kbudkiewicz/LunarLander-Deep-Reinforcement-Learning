@@ -16,6 +16,7 @@ from tqdm import tqdm
 # Internal
 from agent import Agent
 from nn import FeedForwardNetwork
+from plotting import plot_loss_curve, unpack_metric_histories
 from utils import get_nvml_info, get_git_info, get_module_info
 
 
@@ -134,6 +135,11 @@ if __name__ == '__main__':
         if code:
             mlflow.pytorch.log_model(agent.qnet_local, name=agent.qnet_local.name, model_type='dqn')
             mlflow.pytorch.log_model(agent.qnet_target, name=agent.qnet_target.name, model_type='dqn')
+
+        # plot figure
+        df = unpack_metric_histories(client=client, run_id=run.info.run_id, keys=('total_score',))
+        figure = plot_loss_curve(df)
+        mlflow.log_figure(figure=figure, artifact_file='figures/summary.png')
 
         mlflow.end_run()
 
