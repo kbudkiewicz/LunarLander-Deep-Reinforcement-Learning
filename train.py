@@ -2,8 +2,6 @@ import argparse
 import gym
 import torch
 import mlflow
-import pynvml
-import platform
 import numpy as np
 
 # Standard library
@@ -12,33 +10,13 @@ from typing import Optional, Tuple, Union
 
 # Libraries
 # External
-from git import Repo
 from mlflow.tracking import MlflowClient
 from tqdm import tqdm
 
 # Internal
 from agent import Agent
 from nn import FeedForwardNetwork
-from plotting import plot_loss_curve
-
-
-def get_nvml_info() -> dict:
-    try:
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        return {
-            'cuda.version': pynvml.nvmlSystemGetCudaDriverVersion_v2(),
-            'cuda.driver': pynvml.nvmlSystemGetDriverVersion(),
-            'gpu.count': pynvml.nvmlDeviceGetCount(),
-            'gpu.name': pynvml.nvmlDeviceGetName(handle),
-            'gpu.vram_mb': int(pynvml.nvmlDeviceGetMemoryInfo(handle).total / 1e6),
-            'gpu.multiprocessor_count': pynvml.nvmlDeviceGetNumGpuCores(handle),
-        }
-    except pynvml.NVMLError as e:
-        print(f"[WARNING] NVMLError: {e}")
-        return {}
-    finally:
-        pynvml.nvmlShutdown()
+from utils import get_nvml_info, get_git_info, get_module_info
 
 
 def train(
@@ -126,7 +104,6 @@ if __name__ == '__main__':
         mlflow.set_experiment(args.experiment_name)
         run = mlflow.start_run(log_system_metrics=args.log_system_metrics)
         client = MlflowClient()
-        RUN_ID = str(client.get_run(run.info.run_id))
 
         if args.log_system_metrics:
             mlflow.enable_system_metrics_logging()
@@ -139,11 +116,8 @@ if __name__ == '__main__':
         mlflow.log_param('net.device', device)
         mlflow.log_param('agent.type', agent.agent_type)
 
-        mlflow.set_tag('python.version', platform.python_version())
-        mlflow.set_tag('gym.version', gym.__version__)
-        with Repo('.').config_reader() as cfg:
-            mlflow.set_tag('git.user', cfg.get_value('user', 'name'))
-            mlflow.set_tag('git.email', cfg.get_value('user', 'email'))
+        mlflow.set_tags(get_module_info())
+        mlflow.set_tags(get_git_info())
 
     try:
         code, epochs = train(agent=agent, epochs=args.epochs)
