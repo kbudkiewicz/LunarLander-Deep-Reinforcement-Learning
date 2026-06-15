@@ -112,12 +112,25 @@ if __name__ == '__main__':
         if args.log_system_metrics:
             mlflow.enable_system_metrics_logging()
             mlflow.log_params(get_nvml_info())
-        mlflow.log_param('epochs', args.epochs)
-        mlflow.log_param('net.type', agent.qnet_target.name)
+
+        # model params
+        model_input, _ = env.reset()
+        model_output = np.empty([env.action_space.n], dtype=np.float32)
+        signature = infer_signature(model_input.astype(np.float32), model_output)
+        mlflow.pytorch.log_model(
+            agent.qnet_local, name='qnet_local', model_type=agent.qnet_local.model_type, signature=signature
+        )
+        mlflow.pytorch.log_model(
+            agent.qnet_target, name='qnet_target', model_type=agent.qnet_local.model_type, signature=signature
+        )
+        mlflow.log_param('net.type', agent.qnet_target.model_type)
         mlflow.log_param('net.param_count', agent.qnet_target.parameter_count)
         mlflow.log_param('net.dims', args.dims)
         mlflow.log_param('net.layers', len(args.dims))
         mlflow.log_param('net.device', device)
+
+        # environment params
+        mlflow.log_param('epochs', args.epochs)
         mlflow.log_param('agent.type', agent.agent_type)
 
         mlflow.set_tags(get_module_info())
@@ -143,6 +156,11 @@ if __name__ == '__main__':
         df = unpack_metric_histories(client=client, run_id=run.info.run_id, keys=('total_score',))
         figure = plot_loss_curve(df)
         mlflow.log_figure(figure=figure, artifact_file='figures/summary.png')
+        if code:
+            if True:
+                # Model registry
+                result = mlflow.register_model(f"runs:/{run.info.run_id}/qnet_local", 'qnet_local')
+                result = mlflow.register_model(f"runs:/{run.info.run_id}/qnet_target", 'qnet_target')
 
         mlflow.end_run()
 

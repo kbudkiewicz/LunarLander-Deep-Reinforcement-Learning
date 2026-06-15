@@ -52,7 +52,7 @@ class FeedForwardNetwork(nn.Module):
         return self.net(x)
 
     @property
-    def name(self) -> str:
+    def model_type(self) -> str:
         return self.__class__.__name__
 
     @property
