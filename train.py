@@ -22,6 +22,7 @@ from utils import get_nvml_info, get_git_info, get_module_info
 
 def train(
     agent,
+    env: gym.Env,
     epochs: int,
     n_actions: int = 800,
 ) -> Tuple[bool, float]:
@@ -35,7 +36,6 @@ def train(
     .. Return::
         - None
     """
-    env = gym.make('LunarLander-v2')
     mlflow.log_param('environment', 'LunarLander-v2')
     print('Environment initialized.')
 
@@ -91,6 +91,7 @@ if __name__ == '__main__':
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
+    env = gym.make('LunarLander-v2')
     model = FeedForwardNetwork(*args.dims, device=device)
     agent = Agent(*args.dims, device=device)
 
@@ -121,7 +122,7 @@ if __name__ == '__main__':
         mlflow.set_tags(get_git_info())
 
     try:
-        code, epochs = train(agent=agent, epochs=args.epochs)
+        code, epochs = train(agent=agent, env=env, epochs=args.epochs)
     except KeyboardInterrupt:
         mlflow.log_param('KeyboardInterrupt', True)
         epochs = 0
