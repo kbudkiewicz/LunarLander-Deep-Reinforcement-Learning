@@ -18,6 +18,7 @@ from agent import Agent
 from nn import FeedForwardNetwork
 from plotting import plot_loss_curve, unpack_metric_histories
 from utils import get_nvml_info, get_git_info, get_module_info
+from mlflow.models.signature import infer_signature
 
 
 def train(
@@ -77,7 +78,7 @@ def train(
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
-    argparser.add_argument('-d', '--dims', type=tuple, default=(8, 128, 128, 64, 4), required=False)
+    argparser.add_argument('-d', '--dims', type=tuple, default=(128, 128, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
     argparser.add_argument('-L', '--log', type=bool, default=True)
     argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction)
@@ -85,15 +86,16 @@ if __name__ == '__main__':
     argparser.add_argument('--uri', type=str, default=None)
     args = argparser.parse_args()
 
-    # neural network and agent setup
+    # initialize
     if args.device is not None:
         device = args.device
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     env = gym.make('LunarLander-v2')
-    model = FeedForwardNetwork(*args.dims, device=device)
-    agent = Agent(*args.dims, device=device)
+    dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
+    model = FeedForwardNetwork(*dims, device=device)
+    agent = Agent(*dims, device=device)
 
     if args.log:
         # check server connection
