@@ -25,28 +25,25 @@ def train(
     agent,
     env: gym.Env,
     epochs: int,
-    n_actions: int = 800,
+    max_episode_steps: int = 800,
 ) -> Tuple[bool, float]:
     """Train a reinforcement learning agent in a gym environment.
 
     .. Args::
         - n_epochs (int): Number of epochs to train the agent.
-        - n_actions (int): Number of actions available in the environment.
+        - max_episode_steps (int): Number of actions available in the environment.
         - device (torch.device): Device used for training.
 
     .. Return::
         - None
     """
-    mlflow.log_param('environment', 'LunarLander-v2')
-    print('Environment initialized.')
-
     epochs_ = tqdm(range(epochs), total=epochs, desc='Training Agent')
     moving_score = deque(maxlen=100)
 
     for epoch in epochs_:
         score = 0
         state, _ = env.reset()
-        for _ in range(n_actions):
+        for _ in range(max_episode_steps):
             action = agent(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             loss = agent.memorize(state, action, reward, next_state, terminated)
@@ -60,19 +57,43 @@ def train(
         average_score = np.mean(moving_score)
         epochs_.set_postfix(average_score=f'{average_score:.2f}')
 
-        mlflow.log_metric('total_score', score, step=epoch)
-        mlflow.log_metric('average_score', np.mean(moving_score), step=epoch)
+        mlflow.log_metric('metric.total_score', score, step=epoch)
+        mlflow.log_metric('metric.average_score', np.mean(moving_score), step=epoch)
         if isinstance(loss, float):
             mlflow.log_metric('loss', loss, step=epoch)
 
         if average_score >= 200.0:
             print(f'[INFO] Environment solved! Training done in {epoch} epochs.')
-            env.close()
             return True, epoch
 
     print(f'Environment could not be solved within {epochs} epochs.')
-    env.close()
     return False, float('inf')
+
+
+def evaluate_agent(agent, env: gym.Env, epochs: int = 20, max_episode_steps: int = 500) -> np.float64:
+    """Evaluate a trained agent on a given environment"""
+    epochs_ = tqdm(range(epochs), total=epochs, desc='Evaluation')
+    scores = []
+
+    for epoch in epochs_:
+        score = 0
+        state, _ = env.reset()
+        for _ in range(max_episode_steps):
+            action = agent(state)
+            new_state, reward, terminated, truncated, _ = env.step(action)
+            state = new_state
+            score += reward
+            if terminated or truncated:
+                break
+
+        scores.append(score)
+        epochs_.set_postfix(current_score=f'{score:.2f}')
+        mlflow.log_metric('total_score_eval', score, step=epoch)
+
+    mean_score = np.mean(scores)
+    mlflow.log_metric('eval_score', mean_score)
+
+    return mean_score
 
 
 if __name__ == '__main__':
@@ -116,13 +137,6 @@ if __name__ == '__main__':
         # model params
         model_input, _ = env.reset()
         model_output = np.empty([env.action_space.n], dtype=np.float32)
-        signature = infer_signature(model_input.astype(np.float32), model_output)
-        mlflow.pytorch.log_model(
-            agent.qnet_local, name='qnet_local', model_type=agent.qnet_local.model_type, signature=signature
-        )
-        mlflow.pytorch.log_model(
-            agent.qnet_target, name='qnet_target', model_type=agent.qnet_local.model_type, signature=signature
-        )
         mlflow.log_param('net.type', agent.qnet_target.model_type)
         mlflow.log_param('net.param_count', agent.qnet_target.parameter_count)
         mlflow.log_param('net.dims', args.dims)
@@ -130,6 +144,7 @@ if __name__ == '__main__':
         mlflow.log_param('net.device', device)
 
         # environment params
+        mlflow.set_tag('environment', 'LunarLander-v2')
         mlflow.log_param('epochs', args.epochs)
         mlflow.log_param('agent.type', agent.agent_type)
 
@@ -147,21 +162,34 @@ if __name__ == '__main__':
         mlflow.log_param('training_successful', code)
         mlflow.log_param('total_epochs', epochs)
 
-        # save models and their params only if the environment was solved
-        if code:
-            mlflow.pytorch.log_model(agent.qnet_local, name=agent.qnet_local.name, model_type='dqn')
-            mlflow.pytorch.log_model(agent.qnet_target, name=agent.qnet_target.name, model_type='dqn')
 
         # plot figure
         df = unpack_metric_histories(client=client, run_id=run.info.run_id, keys=('total_score',))
         figure = plot_loss_curve(df)
-        mlflow.log_figure(figure=figure, artifact_file='figures/summary.png')
+        mlflow.log_figure(figure=figure, artifact_file='summary.png')
+
+        # Save the agent and its model params only if it solves the environment and achieves a higher score than the
+        # previous agents
         if code:
-            if True:
-                # Model registry
-                result = mlflow.register_model(f"runs:/{run.info.run_id}/qnet_local", 'qnet_local')
-                result = mlflow.register_model(f"runs:/{run.info.run_id}/qnet_target", 'qnet_target')
+            signature = infer_signature(model_input.astype(np.float32), model_output)
+            m_local = mlflow.pytorch.log_model(
+                agent.qnet_local, name='qnet_local', model_type=agent.qnet_local.model_type, signature=signature
+            )
+            m_target = mlflow.pytorch.log_model(
+                agent.qnet_target, name='qnet_target', model_type=agent.qnet_local.model_type, signature=signature
+            )
+            eval_score = evaluate_agent(agent=agent, env=env)
+            runs = mlflow.search_runs(
+                run.info.experiment_id, filter_string=f'metrics.eval_score > {eval_score:.2f}',
+                order_by=['metrics.eval_score'], search_all_experiments=False,
+            )
+            if len(runs) == 0:
+                result = mlflow.register_model(m_local.model_uri, 'qnet_local')
+                result = mlflow.register_model(m_target.model_uri, 'qnet_target')
+            else:
+                print(f'The following runs already contain better models: {runs}')
 
         mlflow.end_run()
+    env.close()
 
     exit(code=not code)
