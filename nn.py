@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+from itertools import pairwise
 from torch import Tensor
 
 
@@ -9,14 +10,14 @@ class LinearBlock(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        activation: nn.Module = nn.ReLU,
-        normalization: nn.Module = None,
+        activation: nn.Module,
+        normalization: nn.Module,
     ):
         super().__init__()
         self.norm = normalization
         self.activation = activation
         self.block = nn.Sequential(
-            normalization if normalization else nn.Identity(),
+            normalization(in_dim) if normalization else nn.Identity(),
             nn.Linear(in_dim, out_dim),
             activation() if activation else nn.Identity(),
         )
@@ -31,21 +32,19 @@ class FeedForwardNetwork(nn.Module):
         *dims: int,
         device: torch.device,
         activation: nn.Module = nn.ReLU,
-        normalization: nn.Module = nn.Dropout(p=0.1)
+        normalization: nn.Module = nn.LayerNorm,
     ):
         super().__init__()
         self.device = device
         self.net = nn.Sequential()
-        for idx in range(len(dims) - 1):
+        for idx, (in_dim, out_dim) in enumerate(pairwise(dims)):
             if idx == len(dims) - 2:
                 activation = nn.Identity
+                normalization = nn.Identity
             self.net.append(
-                LinearBlock(
-                    dims[idx], dims[idx + 1],
-                    activation=activation,
-                    normalization=normalization,
-                )
+                LinearBlock(in_dim, out_dim, activation=activation, normalization=normalization)
             )
+
         self.to(self.device)
 
     def forward(self, x: Tensor) -> Tensor:
