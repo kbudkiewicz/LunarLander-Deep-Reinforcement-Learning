@@ -167,7 +167,6 @@ class Agent(AgentConfig):
         slope = (self.eps_end - self.eps_start) / self.eps_term
         new_eps = slope * epoch + self.eps_start
         self.eps = max(self.eps_end, new_eps)
-        print(f"Epsilon: {self.eps:.4f}")
 
     def save_state_dict(self, path_to_dir: os.PathLike = './model_params'):
         path = os.path.join(path_to_dir, "local.pt")
@@ -178,3 +177,8 @@ class Agent(AgentConfig):
     def load_state_dict(self, path_local, path_target):
         self.qnet_local.load_state_dict(torch.load(path_local))
         self.qnet_target.load_state_dict(torch.load(path_target))
+
+    @property
+    def agent_type(self) -> str:
+        return self.__class__.__name__
+
