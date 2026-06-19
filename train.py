@@ -25,7 +25,7 @@ def train(
     agent,
     env: gym.Env,
     epochs: int,
-    max_episode_steps: int = 800,
+    max_episode_steps: int,
 ) -> Tuple[bool, float]:
     """Train a reinforcement learning agent in a gym environment.
 
@@ -102,9 +102,10 @@ if __name__ == '__main__':
     argparser.add_argument('-d', '--dims', type=tuple, default=(128, 128, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
     argparser.add_argument('-L', '--log', type=bool, default=True)
-    argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction)
-    argparser.add_argument('--experiment-name', type=str, default='LunarLander-v3')
     argparser.add_argument('--uri', type=str, default=None)
+    argparser.add_argument('--experiment-name', type=str, default='LunarLander-v3')
+    argparser.add_argument('--max-episode-steps', type=int, default=800)
+    argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction)
     args = argparser.parse_args()
 
     # initialize
@@ -113,7 +114,7 @@ if __name__ == '__main__':
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    env = gym.make(args.experiment_name)
+    env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps)
     dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
     model = FeedForwardNetwork(*dims, device=device)
     criterion = torch.nn.SmoothL1Loss
@@ -153,7 +154,7 @@ if __name__ == '__main__':
         mlflow.set_tags(get_git_info())
 
     try:
-        code, epochs = train(agent=agent, env=env, epochs=args.epochs)
+        code, epochs = train(agent=agent, env=env, epochs=args.epochs, max_episode_steps=args.max_episode_steps)
     except KeyboardInterrupt:
         mlflow.log_param('KeyboardInterrupt', True)
         epochs = 0
