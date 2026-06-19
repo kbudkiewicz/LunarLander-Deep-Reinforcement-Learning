@@ -74,7 +74,7 @@ class Agent(AgentConfig):
         self.device = device
         self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr)
         self.memory = ReplayMemory(self.memory_size, self.batch_size)
-        self.criterion = criterion()
+        self.criterion = criterion
         self.action_space = action_space
 
         if not inference_only:

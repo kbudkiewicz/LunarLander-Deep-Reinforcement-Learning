@@ -1,6 +1,7 @@
 import argparse
 import torch
 import mlflow
+import logging
 import numpy as np
 import gymnasium as gym
 
@@ -63,7 +64,7 @@ def train(
             mlflow.log_metric('loss', loss, step=epoch)
 
         if average_score >= 200.0:
-            print(f'[INFO] Environment solved! Training done in {epoch} epochs.')
+            logger.info(f'Environment within {epoch} epochs.')
             return True, epoch
 
     print(f'Environment could not be solved within {epochs} epochs.')
@@ -117,15 +118,18 @@ if __name__ == '__main__':
     env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps)
     dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
     model = FeedForwardNetwork(*dims, device=device)
-    criterion = torch.nn.SmoothL1Loss
+    criterion = torch.nn.SmoothL1Loss()
     agent = Agent(*dims, device=device, action_space=env.action_space.n, criterion=criterion)
 
     if args.log:
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
         # check server connection
         if isinstance(args.uri, str):
             mlflow.set_tracking_uri(args.uri)
+            logger.info(f'Logging to {args.uri}')
         if mlflow.active_run():
-            print("[INFO] Active run detected. Ending run...")
+            logger.info('Active run detected. Ending run...')
             mlflow.end_run()
 
         mlflow.set_experiment(args.experiment_name)
@@ -133,6 +137,7 @@ if __name__ == '__main__':
         client = MlflowClient()
 
         if args.log_system_metrics:
+            logger.info(f'Logging system metrics: {args.log_system_metrics}')
             mlflow.enable_system_metrics_logging()
             mlflow.log_params(get_nvml_info())
 
@@ -144,6 +149,7 @@ if __name__ == '__main__':
         mlflow.log_param('net.dims', args.dims)
         mlflow.log_param('net.layers', len(args.dims))
         mlflow.log_param('net.device', device)
+        mlflow.log_param('net.criterion', criterion.__class__.__name__)
 
         # environment params
         mlflow.set_tag('environment', args.experiment_name)
@@ -154,13 +160,17 @@ if __name__ == '__main__':
         mlflow.set_tags(get_git_info())
 
     try:
+        logging.info(f'Starting agent training for {args.epochs} epochs.')
         code, epochs = train(agent=agent, env=env, epochs=args.epochs, max_episode_steps=args.max_episode_steps)
+        keyboard_interrupt = False
     except KeyboardInterrupt:
-        mlflow.log_param('KeyboardInterrupt', True)
-        epochs = 0
+        logging.info(f'Received KeyboardInterrupt. Ending training...')
         code = False
+        epochs = 0
+        keyboard_interrupt = True
 
     if args.log:
+        mlflow.log_param('KeyboardInterrupt', keyboard_interrupt)
         mlflow.log_param('training_successful', code)
         mlflow.log_param('total_epochs', epochs)
 
@@ -185,13 +195,17 @@ if __name__ == '__main__':
                 run.info.experiment_id, filter_string=f'metrics.eval_score > {eval_score:.2f}',
                 order_by=['metrics.eval_score'], search_all_experiments=False,
             )
+            logging.info(f'Evaluation done. Achieved score {eval_score:.2f}')
             if len(runs) == 0:
+                logging.info(f'No better model found. Registering {m_local.model_uri} to model registry.')
                 result = mlflow.register_model(m_local.model_uri, 'qnet_local')
                 result = mlflow.register_model(m_target.model_uri, 'qnet_target')
             else:
                 print(f'The following runs already contain better models: {runs}')
 
         mlflow.end_run()
+        logging.info('Ending MLFlow run.')
     env.close()
+    logging.info(f'Gymnasium environment closed. Exiting with code: {not code}')
 
     exit(code=not code)
