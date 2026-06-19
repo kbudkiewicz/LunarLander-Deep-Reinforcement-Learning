@@ -116,7 +116,8 @@ if __name__ == '__main__':
     env = gym.make(args.experiment_name)
     dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
     model = FeedForwardNetwork(*dims, device=device)
-    agent = Agent(*dims, device=device)
+    criterion = torch.nn.SmoothL1Loss
+    agent = Agent(*dims, device=device, action_space=env.action_space.n, criterion=criterion)
 
     if args.log:
         # check server connection

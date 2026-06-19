@@ -5,7 +5,6 @@ import copy
 import torch
 import torch.nn as nn
 import numpy as np
-import gymnasium as gym
 
 from abc import abstractmethod
 from typing import Union, Tuple
@@ -44,8 +43,6 @@ class AgentConfig:
     """
     Hyperparameters for the RL agent. Contains both agent, as well as network hyperparameters.
     """
-    state_space: int = 8
-    action_space: int = 4
     memory_size: int = 100_000
     t_step: int = 0
     batch_size: int = 64
@@ -63,7 +60,11 @@ class Agent(AgentConfig):
     def __init__(
         self,
         *dims,
-        device,
+        device: torch.device,
+        action_space: int,
+        criterion: torch.nn.Module,
+        weight_decay: float = 0.0,
+        inference_only: bool = False,
     ):
         super().__init__()
         self.eps = self.eps_start
@@ -73,6 +74,12 @@ class Agent(AgentConfig):
         self.device = device
         self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr)
         self.memory = ReplayMemory(self.memory_size, self.batch_size)
+        self.criterion = criterion()
+        self.action_space = action_space
+
+        if not inference_only:
+            self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr, weight_decay=weight_decay)
+            self.memory = ReplayMemory(self.memory_size, self.batch_size)
 
     def __call__(self, observation: np.array) -> np.array:
         """
@@ -93,7 +100,7 @@ class Agent(AgentConfig):
                 action_values = self.qnet_local(observation)
                 return torch.argmax(action_values).item()
         else:
-            return random.randint(0, 2)
+            return random.randint(0, self.action_space - 1)
 
     def memorize(self, *args) -> Union[float, None]:
         """
