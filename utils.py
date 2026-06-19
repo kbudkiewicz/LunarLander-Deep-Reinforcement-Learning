@@ -1,6 +1,6 @@
-import gym
 import pynvml
 import platform
+import gymnasium as gym
 
 from git import Repo
 
