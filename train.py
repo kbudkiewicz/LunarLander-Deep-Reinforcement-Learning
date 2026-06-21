@@ -117,9 +117,13 @@ if __name__ == '__main__':
 
     env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps)
     dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
-    model = FeedForwardNetwork(*dims, device=device)
+    qnet_local = FeedForwardNetwork(*dims, device=device)
+    qnet_target = FeedForwardNetwork(*dims, device=device)
     criterion = torch.nn.SmoothL1Loss()
-    agent = Agent(*dims, device=device, action_space=env.action_space.n, criterion=criterion)
+    agent = Agent(
+        qnet_local=qnet_local, qnet_target=qnet_target, device=device, action_space=env.action_space.n,
+        criterion=criterion
+    )
 
     if args.log:
         logger = logging.getLogger()

@@ -10,7 +10,6 @@ from abc import abstractmethod
 from typing import Union, Tuple
 from torch import Tensor
 from collections import deque, namedtuple
-from nn import FeedForwardNetwork
 
 # defining memory instance
 memory = namedtuple('Memory', ('s', 'a', 'r', 'next_s', 'term'))
@@ -59,7 +58,8 @@ class AgentConfig:
 class Agent(AgentConfig):
     def __init__(
         self,
-        *dims,
+        qnet_local: torch.nn.Module,
+        qnet_target: torch.nn.Module,
         device: torch.device,
         action_space: int,
         criterion: torch.nn.Module,
@@ -68,9 +68,8 @@ class Agent(AgentConfig):
     ):
         super().__init__()
         self.eps = self.eps_start
-        # FIXME: replacing local and target with module and its deepcopy breaks the agent
-        self.qnet_local = FeedForwardNetwork(*dims, device=device)
-        self.qnet_target = FeedForwardNetwork(*dims, device=device).eval()
+        self.qnet_local = qnet_local
+        self.qnet_target = qnet_target.eval()
         self.device = device
         self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr)
         self.memory = ReplayMemory(self.memory_size, self.batch_size)
