@@ -47,12 +47,10 @@ class AgentConfig:
     batch_size: int = 64
     tau: float = 2.5e-3     # soft parameter update constant
     gamma: float = 0.99     # discount factor
-    lr: float = 1e-3
     net_update_freq: int = 6
     eps_start: float = 0.7  # starting epsilon value
     eps_end: float = 0.05   # final epsilon value
-    eps_term: int = 200     # episode # at which eps_end is reached4
-    loss: float = float('inf')
+    eps_term: int = 300     # episode at which eps_end is reached
 
 
 class Agent(AgentConfig):
@@ -63,7 +61,9 @@ class Agent(AgentConfig):
         device: torch.device,
         action_space: int,
         criterion: torch.nn.Module,
+        lr: float = 1e-3,
         weight_decay: float = 0.0,
+        max_norm: float = 10.,
         inference_only: bool = False,
     ):
         super().__init__()
@@ -71,13 +71,13 @@ class Agent(AgentConfig):
         self.qnet_local = qnet_local
         self.qnet_target = qnet_target.eval()
         self.device = device
-        self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr)
         self.memory = ReplayMemory(self.memory_size, self.batch_size)
         self.criterion = criterion
         self.action_space = action_space
 
         if not inference_only:
-            self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), self.lr, weight_decay=weight_decay)
+            self.optimizer = torch.optim.Adam(self.qnet_local.parameters(), lr=lr, weight_decay=weight_decay)
+            self.max_norm = max_norm
             self.memory = ReplayMemory(self.memory_size, self.batch_size)
 
     def __call__(self, observation: np.array) -> np.array:
@@ -101,7 +101,7 @@ class Agent(AgentConfig):
         else:
             return random.randint(0, self.action_space - 1)
 
-    def memorize(self, *args) -> Union[float, None]:
+    def memorize(self, *args) -> Union[Tuple[float, float], Tuple[None, None]]:
         """
         Save SARS to agent's ``ReplayMemory``.
 
@@ -111,31 +111,9 @@ class Agent(AgentConfig):
         self.memory.remember(*args)
         self.t_step += 1
         if (self.t_step % self.net_update_freq == 0) and (self.memory.__len__() >= self.batch_size):
-            loss = self.update_net()
-            return loss
-        return None
-
-    def backprop(
-        self,
-        predicted: Tensor,
-        target: Tensor,
-        criterion: torch.nn.Module = torch.nn.MSELoss(),
-    ) -> Union[float]:
-        """
-        Perform a backpropagation step.
-
-        Args:
-            predicted (Tensor): Predicted values
-            target (Tensor): Actual values
-            criterion (Callable): Loss function
-            do_return (bool): Return the loss value. Default is True.
-        """
-        self.optimizer.zero_grad()
-        torch.nn.utils.clip_grad_norm_(self.qnet_local.parameters(), max_norm=1.)
-        loss = criterion(predicted, target)
-        loss.backward()
-        self.optimizer.step()
-        return loss.item()
+            loss, grad_norm = self.update_net()
+            return loss, grad_norm
+        return None, None
 
     @abstractmethod
     def policy_update(
@@ -148,7 +126,7 @@ class Agent(AgentConfig):
             - sars (Tuple of Tensor): Tuple of batched State, Action, Reward, State'
         """
 
-    def update_net(self) -> float:
+    def update_net(self) -> Tuple[float, float]:
         """Perform soft parameter update based on a sample from replay memory."""
         state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
 
@@ -156,13 +134,19 @@ class Agent(AgentConfig):
         q = self.qnet_target(state_new)
         q_target = reward + self.gamma * torch.max(q, dim=1)[0] * (1 - flags)  # q_target
         q_local = self.qnet_local(state).gather(1, action).squeeze()  # current q
-        loss = self.backprop(q_local, q_target)
+
+        # backpropagation
+        self.optimizer.zero_grad()
+        loss = self.criterion(q_local, q_target)
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.qnet_local.parameters(), max_norm=self.max_norm)
+        self.optimizer.step()
 
         # soft parameter update
         for target_param, local_param in zip(self.qnet_target.parameters(), self.qnet_local.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1. - self.tau) * target_param.data)
 
-        return loss
+        return loss.item(), grad_norm.item()
 
     def update_epsilon(self, epoch: int) -> None:
         r"""Calculates a new :math:`\epsilon` for each successive epoch following a predefined rate schedule.

@@ -47,13 +47,13 @@ def train(
         for _ in range(max_episode_steps):
             action = agent(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
-            loss = agent.memorize(state, action, reward, next_state, terminated)
+            loss, grad_norm = agent.memorize(state, action, reward, next_state, terminated)
             state = next_state
             score += reward
             if terminated or truncated:
                 break
-            agent.update_epsilon(epoch=epoch)
 
+        agent.update_epsilon(epoch=epoch)
         moving_score.append(score)
         average_score = np.mean(moving_score)
         epochs_.set_postfix(average_score=f'{average_score:.2f}')
@@ -62,6 +62,7 @@ def train(
         mlflow.log_metric('metric.average_score', np.mean(moving_score), step=epoch)
         if isinstance(loss, float):
             mlflow.log_metric('loss', loss, step=epoch)
+            mlflow.log_metric('grad_norm', grad_norm, step=epoch)
 
         if average_score >= 200.0:
             logger.info(f'Environment within {epoch} epochs.')
@@ -154,6 +155,11 @@ if __name__ == '__main__':
         mlflow.log_param('net.layers', len(args.dims))
         mlflow.log_param('net.device', device)
         mlflow.log_param('net.criterion', criterion.__class__.__name__)
+        mlflow.log_param('optimizer.type', agent.optimizer.__class__.__name__)
+        mlflow.log_param('optimizer.lr', agent.optimizer.defaults['lr'])
+        mlflow.log_param('optimizer.betas', agent.optimizer.defaults['betas'])
+        mlflow.log_param('optimizer.weight_decay', agent.optimizer.defaults['weight_decay'])
+        mlflow.log_param('optimizer.max_norm', agent.max_norm)
 
         # environment params
         mlflow.set_tag('environment', args.experiment_name)
