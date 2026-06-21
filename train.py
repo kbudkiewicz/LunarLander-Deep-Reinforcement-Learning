@@ -100,7 +100,7 @@ def evaluate_agent(agent, env: gym.Env, epochs: int = 20, max_episode_steps: int
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
-    argparser.add_argument('-d', '--dims', type=tuple, default=(128, 128, 64), required=False)
+    argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(128, 128, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
     argparser.add_argument('-L', '--log', type=bool, default=True)
     argparser.add_argument('--uri', type=str, default=None)
@@ -188,7 +188,7 @@ if __name__ == '__main__':
                 agent.qnet_local, name='qnet_local', model_type=agent.qnet_local.model_type, signature=signature
             )
             m_target = mlflow.pytorch.log_model(
-                agent.qnet_target, name='qnet_target', model_type=agent.qnet_local.model_type, signature=signature
+                agent.qnet_target, name='qnet_target', model_type=agent.qnet_target.model_type, signature=signature
             )
             eval_score = evaluate_agent(agent=agent, env=env)
             runs = mlflow.search_runs(

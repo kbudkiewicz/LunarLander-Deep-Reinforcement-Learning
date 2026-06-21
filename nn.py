@@ -17,8 +17,8 @@ class LinearBlock(nn.Module):
         self.norm = normalization
         self.activation = activation
         self.block = nn.Sequential(
-            normalization(in_dim) if normalization else nn.Identity(),
             nn.Linear(in_dim, out_dim),
+            normalization(out_dim) if normalization else nn.Identity(),
             activation() if activation else nn.Identity(),
         )
 
