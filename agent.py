@@ -17,6 +17,8 @@ memory = namedtuple('Memory', ('s', 'a', 'r', 'next_s', 'term'))
 
 
 class ReplayMemory(object):
+    """Replay Memory class as described in `Human-level control through deep reinforcement learning
+    <https://www.nature.com/articles/nature14236>`_."""
     def __init__(self, memory_size: int, batch_size: int):
         self.memory = deque(maxlen=memory_size)
         self.batch_size = batch_size
@@ -40,9 +42,7 @@ class ReplayMemory(object):
 
 
 class AgentConfig:
-    """
-    Hyperparameters for the RL agent. Contains both agent, as well as network hyperparameters.
-    """
+    """Hyperparameters for the RL agent. Contains both agent, as well as network hyperparameters."""
     memory_size: int = 100_000
     t_step: int = 0
     batch_size: int = 64
@@ -150,6 +150,7 @@ class Agent(AgentConfig):
         """
 
     def update_net(self) -> float:
+        """Perform soft parameter update based on a sample from replay memory."""
         state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
 
         # Use Bellman equation to calculate the Q-values
