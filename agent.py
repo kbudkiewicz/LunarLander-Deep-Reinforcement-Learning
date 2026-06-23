@@ -167,6 +167,12 @@ class Agent(AgentConfig):
         path = os.path.join(path_to_dir, "target.pt")
         torch.save(self.qnet_target.state_dict(), path)
 
+    def zero_epsilon(self):
+        self.eps = 0
+        self.eps_start = 0
+        self.eps_end = 0
+        self.eps_term = 0
+
     def load_state_dict(self, path_local, path_target):
         self.qnet_local.load_state_dict(torch.load(path_local))
         self.qnet_target.load_state_dict(torch.load(path_target))
