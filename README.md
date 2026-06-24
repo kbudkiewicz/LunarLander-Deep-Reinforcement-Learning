@@ -22,17 +22,16 @@ as `qnet_local` and `qnet_target`. These can be later imported via MLflow's Pyto
 ## Setup
 Install the required dependencies via:
 ```bash
-conda install --file environment.yaml
+conda install --name <ENV-NAME:STR> --file environment.yaml
 ```
 
-If you encounter errors with PyTorch installation, try removing its dependencies from `environment.yaml`. Then, install
-`torch` manually via:
-```bash
-pip install torch==VERSION --index-url https://download.pytorch.org/whl/cuXXX
-```
+> [!NOTE]
+> Installing `torch` wheels via `pip` may introduce a mismatch of dependencies between the modules and cause an OpenMP
+> error, preventing automatic figure logging.
 
-To see your runs in the browser, enable a local MLFlow server via a given port (`5000` by default). 
+To see your runs in the browser, enable a local MLFlow server via a given port.
 ```bash
-mlflow server --port <int>
+mlflow server --port <INT>
 ```
+You can view your experiments and runs in them via MLflow GUI by opening [localhost](http://localhost:5000/) in your browser.
 This is not necessary to log if you provide a localhost as the default Uniform Resource Identifier (URI).
