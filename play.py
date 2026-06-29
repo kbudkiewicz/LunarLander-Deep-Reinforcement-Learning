@@ -4,6 +4,7 @@ import mlflow
 import gymnasium as gym
 
 from agent import Agent
+from utils import get_agent_class
 
 
 if __name__ == '__main__':
@@ -19,6 +20,7 @@ if __name__ == '__main__':
     )
     argsparer.add_argument('-D', '--device', type=str)
     argsparer.add_argument('-m', '--model-name', type=str, default='qnet_local')
+    argsparer.add_argument('-a', '--agent', type=str, required=True)
     args = argsparer.parse_args()
 
     if args.device is not None:
@@ -44,11 +46,16 @@ if __name__ == '__main__':
     model_uri = f"models:/qnet_target/{latest.version}"
     qnet_target = mlflow.pytorch.load_model(model_uri=model_uri, device=device)
 
-    agent = Agent(
-        qnet_local=qnet_local, qnet_target=qnet_target, criterion=None, device=device, action_space=env.action_space.n,
-        inference_only=True
-    )
-    agent.zero_epsilon()
+    if not isinstance(args.agent, str):
+        raise ValueError("Agent must be a string.")
+    else:
+        AgentClass = get_agent_class(args.agent)
+        # TODO: check if the agent fits the chosen environment (continuous or discrete)
+        agent = AgentClass(
+            local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
+            criterion=None
+        )
+        agent.zero_epsilon()
 
     for _ in range(args.epochs):
         terminated = truncated = False

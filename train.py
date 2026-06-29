@@ -15,7 +15,7 @@ from mlflow.tracking import MlflowClient
 from tqdm import tqdm
 
 # Internal
-from agent import Agent
+from agent import *
 from nn import FeedForwardNetwork
 from plotting import plot_loss_curve, unpack_metric_histories
 from utils import get_nvml_info, get_git_info, get_module_info
@@ -121,8 +121,8 @@ if __name__ == '__main__':
     qnet_local = FeedForwardNetwork(*dims, device=device)
     qnet_target = FeedForwardNetwork(*dims, device=device)
     criterion = torch.nn.SmoothL1Loss()
-    agent = Agent(
-        qnet_local=qnet_local, qnet_target=qnet_target, device=device, action_space=env.action_space.n,
+    agent = DoubleDQN(
+        local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
         criterion=criterion
     )
 
@@ -149,17 +149,13 @@ if __name__ == '__main__':
         # model params
         model_input, _ = env.reset()
         model_output = np.empty([env.action_space.n], dtype=np.float32)
-        mlflow.log_param('net.type', agent.qnet_target.model_type)
-        mlflow.log_param('net.param_count', agent.qnet_target.parameter_count)
+        mlflow.log_param('net.type', agent.target.model_type)
+        mlflow.log_param('net.param_count', agent.target.parameter_count)
         mlflow.log_param('net.dims', args.dims)
         mlflow.log_param('net.layers', len(args.dims))
         mlflow.log_param('net.device', device)
         mlflow.log_param('net.criterion', criterion.__class__.__name__)
-        mlflow.log_param('optimizer.type', agent.optimizer.__class__.__name__)
-        mlflow.log_param('optimizer.lr', agent.optimizer.defaults['lr'])
-        mlflow.log_param('optimizer.betas', agent.optimizer.defaults['betas'])
-        mlflow.log_param('optimizer.weight_decay', agent.optimizer.defaults['weight_decay'])
-        mlflow.log_param('optimizer.max_norm', agent.max_norm)
+        mlflow.log_params(agent.get_optimizer_config())
 
         # environment params
         mlflow.set_tag('environment', args.experiment_name)
@@ -195,10 +191,10 @@ if __name__ == '__main__':
         if code:
             signature = infer_signature(model_input.astype(np.float32), model_output)
             m_local = mlflow.pytorch.log_model(
-                agent.qnet_local, name='qnet_local', model_type=agent.qnet_local.model_type, signature=signature
+                agent.local, name='qnet_local', model_type=agent.local.model_type, signature=signature
             )
             m_target = mlflow.pytorch.log_model(
-                agent.qnet_target, name='qnet_target', model_type=agent.qnet_target.model_type, signature=signature
+                agent.target, name='qnet_target', model_type=agent.target.model_type, signature=signature
             )
             eval_score = evaluate_agent(agent=agent, env=env)
             runs = mlflow.search_runs(
