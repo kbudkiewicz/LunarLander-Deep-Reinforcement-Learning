@@ -18,7 +18,7 @@ from tqdm import tqdm
 from agent import *
 from nn import FeedForwardNetwork
 from plotting import plot_loss_curve, unpack_metric_histories
-from utils import get_nvml_info, get_git_info, get_module_info
+from utils import get_nvml_info, get_git_info, get_module_info, get_agent_class
 from mlflow.models.signature import infer_signature
 
 
@@ -101,6 +101,7 @@ def evaluate_agent(agent, env: gym.Env, epochs: int = 20, max_episode_steps: int
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
+    argparser.add_argument('-a', '--agent', type=str, required=True)
     argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(128, 128, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
     argparser.add_argument('-L', '--log', type=bool, default=True)
@@ -121,10 +122,15 @@ if __name__ == '__main__':
     qnet_local = FeedForwardNetwork(*dims, device=device)
     qnet_target = FeedForwardNetwork(*dims, device=device)
     criterion = torch.nn.SmoothL1Loss()
-    agent = DoubleDQN(
-        local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
-        criterion=criterion
-    )
+
+    if not isinstance(args.agent, str):
+        raise ValueError("Agent must be a string.")
+    else:
+        AgentClass = get_agent_class(args.agent)
+        agent = AgentClass(
+            local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
+            criterion=criterion
+        )
 
     if args.log:
         logger = logging.getLogger()

@@ -1,8 +1,10 @@
 import pynvml
 import platform
 import gymnasium as gym
+import agent as _agent_module
 
 from git import Repo
+from agent import Agent
 
 
 def get_nvml_info() -> dict:
@@ -37,3 +39,10 @@ def get_git_info() -> dict:
             'git.user': cfg.get_value('user', 'name'),
             'git.email': cfg.get_value('user', 'email'),
         }
+
+
+def get_agent_class(agent_type: str) -> type[Agent]:
+    """Import a chosen agent type module."""
+    if not hasattr(_agent_module, agent_type):
+        raise ImportError(f"Agent class {agent_type!r} is not a valid class. Choose from {_agent_module.__all__}")
+    return getattr(_agent_module, agent_type)
