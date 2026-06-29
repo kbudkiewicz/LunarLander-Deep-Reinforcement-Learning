@@ -57,13 +57,16 @@ if __name__ == '__main__':
         )
         agent.zero_epsilon()
 
-    for _ in range(args.epochs):
-        terminated = truncated = False
-        state, _ = env.reset()
-        while not (truncated or terminated):
-            action = agent(state)
-            new_state, _, terminated, truncated, _ = env.step(action)
-            state = new_state
+    try:
+        for _ in range(args.epochs):
+            terminated = truncated = False
+            state, _ = env.reset()
+            while not (truncated or terminated):
+                action = agent(state)
+                new_state, _, terminated, truncated, _ = env.step(action)
+                state = new_state
+    except KeyboardInterrupt:
+        print("[INFO]: Received KeyboardInterrupt. Game stopped.")
 
     env.close()
     exit(0)
