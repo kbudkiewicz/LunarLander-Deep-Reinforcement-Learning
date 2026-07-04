@@ -136,3 +136,19 @@ class TestDoubleDQN(BaseAgentTest):
         )
 
 
+class TestDuelingDQN(BaseAgentTest):
+    @pytest.fixture
+    def network(self, dims, device: torch.device) -> DuelingQNetwork:
+        return DuelingQNetwork(*dims, device=device)
+
+    @pytest.fixture
+    def agent(self, network, criterion, action_space, device) -> DuelingDQN:
+        local = network
+        target = copy.deepcopy(local)
+        return DuelingDQN(
+            local=local,
+            target=target,
+            criterion=criterion,
+            action_space=action_space,
+            device=device,
+        )

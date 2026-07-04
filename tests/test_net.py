@@ -5,7 +5,7 @@ import numpy as np
 from typing import Callable, Tuple
 from torch import Tensor
 from torch.nn import Module
-from nn import FeedForwardNetwork
+from nn import FeedForwardNetwork, DuelingQNetwork
 
 
 class BaseNetworkTest:
@@ -91,3 +91,50 @@ class TestFeedForwardNetwork(BaseNetworkTest):
             return FeedForwardNetwork(*args, **kwargs)
         return _model
 
+
+class TestDuelingQNetwork(BaseNetworkTest):
+    @pytest.fixture(
+        params=[(4, 1, 8), (4, 128, 128, 8)],
+        ids=["minimal", "normal"]
+    )
+    def dims(self, request) -> Tuple[int, ...]:
+        """Set of valid model dimensions"""
+        return request.param
+
+    @pytest.fixture(
+        params=[(0,), (1,), (4, 8), (0, 1, 8), (4, 1, 0)],
+        ids=["zero_dimension", "single_dimension", "no_hidden_dimension", "zero_dimension_in", "zero_dimension_out"]
+    )
+    def dims_invalid(self, request) -> Tuple[int, ...]:
+        """Set of invalid model dimensions"""
+        return request.param
+
+    @pytest.fixture(
+        params=[1, np.random.randint(2, 8)],
+        ids=["single", "more"]
+    )
+    def encoder_depth(self, request) -> int:
+        return request.param
+
+    @pytest.fixture(
+        params=[-1, 0],
+        ids=["negative_depth", "no_depth"]
+    )
+    def encoder_depth_invalid(self, request) -> int:
+        return request.param
+
+    @staticmethod
+    def test_init_valid_encoder_depth(dims, encoder_depth, build_model, device):
+        net = build_model(*dims, encoder_depth=encoder_depth, device=device)
+        assert isinstance(net, DuelingQNetwork)
+
+    @staticmethod
+    def test_init_invalid_encoder_depth(dims, encoder_depth_invalid, build_model, device):
+        with pytest.raises(ValueError):
+            build_model(*dims, encoder_depth=encoder_depth_invalid, device=device)
+
+    @pytest.fixture(scope="class")
+    def build_model(self) -> Callable[..., DuelingQNetwork]:
+        def _make(*args, **kwargs):
+            return DuelingQNetwork(*args, **kwargs)
+        return _make

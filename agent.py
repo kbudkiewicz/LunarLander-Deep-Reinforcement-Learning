@@ -10,12 +10,13 @@ from abc import ABC, abstractmethod
 from typing import Union, Tuple
 from torch import Tensor
 from collections import deque, namedtuple
-
+from nn import DuelingQNetwork
 
 __all__ = [
     'ReplayMemory',
     'DeepQNetwork',
     'DoubleDQN',
+    'DuelingDQN',
 ]
 
 
@@ -280,6 +281,65 @@ class DoubleDQN(Agent):
         with torch.no_grad():
             argmax_a = torch.argmax(self.local(state_new), dim=1).unsqueeze(1)  # B, 1
             q_target = reward + self.gamma * self.target(state_new).gather(1, argmax_a).squeeze(1) * (1 - flags)
+        q_local = self.local(state).gather(1, action).squeeze()
+        loss, grad_norm = self.backpropagate(q_local, q_target)
+
+        return loss, grad_norm
+
+
+class DuelingDQN(Agent):
+    """Dueling Network based on `Dueling Network Architectures for Deep Reinforcement Learning
+    <https://arxiv.org/abs/1511.06581>`_.
+
+    The Q-value target can be defined as a maximum of the approximated Q-value (DQN) or the argmax of the approximated
+    Q-value across actions (Double DQN) via the ``use_double`` attribute.
+    """
+    def __init__(
+        self,
+        local: DuelingQNetwork,
+        target: DuelingQNetwork,
+        device: torch.device,
+        criterion: torch.nn.Module,
+        action_space: int,
+        use_double: bool = True,
+        **kwargs,
+    ):
+        if not isinstance(local, DuelingQNetwork) or not isinstance(target, DuelingQNetwork):
+            raise AttributeError(
+                f"Value and advantage networks must be a DuelingQNetwork class, but are {type(local)} and {type(target)}."
+            )
+
+        super().__init__(
+            local=local,
+            target=target,
+            device=device,
+            criterion=criterion,
+            action_space=action_space,
+            **kwargs
+        )
+        self.use_double = use_double
+
+    def update_net(self) -> Tuple[float, float]:
+        """Perform soft parameter update based on a sample from replay memory.
+
+        If ``use_double`` is ``True``, then the Q-value target is defined as:
+
+        .. math::
+            Q(s,a) = R_{t+1} + \gamma Q(S_{t+1}, \argmax_a Q(S_{t+1}, a), \Theta_t; \Theta_t').
+
+        Otherwise, the standard DQN target is used:
+
+        .. math::
+            Q(s,a) = R_{t+1} + \gamma \max_a Q(S_{t+1}, a), \Theta_t; \Theta_t')
+        """
+        state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
+
+        with torch.no_grad():
+            if self.use_double:
+                argmax_a = torch.argmax(self.local(state_new), dim=1).unsqueeze(1)  # B, 1
+                q_target = reward + self.gamma * self.target(state_new).gather(1, argmax_a).squeeze(1) * (1 - flags)
+            else:
+                q_target = reward + self.gamma * torch.max(self.target(state_new), dim=1)[0] * (1 - flags)
         q_local = self.local(state).gather(1, action).squeeze()
         loss, grad_norm = self.backpropagate(q_local, q_target)
 
