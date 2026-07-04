@@ -35,6 +35,11 @@ class FeedForwardNetwork(nn.Module):
         normalization: nn.Module = nn.LayerNorm,
     ):
         super().__init__()
+        if len(dims) < 2:
+            raise ValueError("Need at least 2 dimensions to build a minimal model.")
+        if any(d < 1 for d in dims):
+            raise ValueError("Model dimensions must be strictly positive.")
+
         self.device = device
         self.net = nn.Sequential()
         for idx, (in_dim, out_dim) in enumerate(pairwise(dims)):
