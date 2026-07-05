@@ -107,11 +107,9 @@ class TestDQN(BaseAgentTest):
 
     @pytest.fixture
     def agent(self, network, criterion, action_space, device):
-        local = network
-        target = copy.deepcopy(local)
+        model = network
         return DeepQNetwork(
-            local=local,
-            target=target,
+            model=model,
             criterion=criterion,
             action_space=action_space,
             device=device,
@@ -125,11 +123,9 @@ class TestDoubleDQN(BaseAgentTest):
 
     @pytest.fixture
     def agent(self, network, criterion, action_space, device):
-        local = network
-        target = copy.deepcopy(local)
+        model = network
         return DoubleDQN(
-            local=local,
-            target=target,
+            model=model,
             criterion=criterion,
             action_space=action_space,
             device=device,
@@ -143,11 +139,9 @@ class TestDuelingDQN(BaseAgentTest):
 
     @pytest.fixture
     def agent(self, network, criterion, action_space, device) -> DuelingDQN:
-        local = network
-        target = copy.deepcopy(local)
+        model = network
         return DuelingDQN(
-            local=local,
-            target=target,
+            model=model,
             criterion=criterion,
             action_space=action_space,
             device=device,

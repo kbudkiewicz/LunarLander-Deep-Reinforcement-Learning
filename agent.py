@@ -51,8 +51,7 @@ class ReplayMemory(object):
 class Agent(ABC):
     def __init__(
         self,
-        local: torch.nn.Module,
-        target: torch.nn.Module,
+        model: torch.nn.Module,
         device: torch.device,
         action_space: int,
         criterion: torch.nn.Module,
@@ -70,8 +69,8 @@ class Agent(ABC):
         replay_memory_size: int = int(1e5),
     ):
         super().__init__()
-        self.local = local
-        self.target = target.eval()
+        self.local = model
+        self.target = copy.deepcopy(model).eval()
         self.device = device
         self.batch_size = batch_size
         self.replay_memory_size = replay_memory_size
@@ -217,16 +216,14 @@ class DeepQNetwork(Agent):
     <https://www.nature.com/articles/nature14236>`_."""
     def __init__(
         self,
-        local: torch.nn.Module,
-        target: torch.nn.Module,
+        model: torch.nn.Module,
         device: torch.device,
         criterion: torch.nn.Module,
         action_space: int,
         **kwargs,
     ):
         super().__init__(
-            local=local,
-            target=target,
+            model=model,
             device=device,
             criterion=criterion,
             action_space=action_space,
@@ -250,16 +247,14 @@ class DoubleDQN(Agent):
 
     def __init__(
         self,
-        local: torch.nn.Module,
-        target: torch.nn.Module,
+        model: torch.nn.Module,
         device: torch.device,
         criterion: torch.nn.Module,
         action_space: int,
         **kwargs,
     ):
         super().__init__(
-            local=local,
-            target=target,
+            model=model,
             device=device,
             criterion=criterion,
             action_space=action_space,
@@ -296,22 +291,20 @@ class DuelingDQN(Agent):
     """
     def __init__(
         self,
-        local: DuelingQNetwork,
-        target: DuelingQNetwork,
+        model: DuelingQNetwork,
         device: torch.device,
         criterion: torch.nn.Module,
         action_space: int,
         use_double: bool = True,
         **kwargs,
     ):
-        if not isinstance(local, DuelingQNetwork) or not isinstance(target, DuelingQNetwork):
+        if not isinstance(model, DuelingQNetwork):
             raise AttributeError(
-                f"Value and advantage networks must be a DuelingQNetwork class, but are {type(local)} and {type(target)}."
+                f"Value and advantage networks must be a DuelingQNetwork class, but are {type(model)}."
             )
 
         super().__init__(
-            local=local,
-            target=target,
+            model=model,
             device=device,
             criterion=criterion,
             action_space=action_space,

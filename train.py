@@ -119,8 +119,7 @@ if __name__ == '__main__':
 
     env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps)
     dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
-    qnet_local = FeedForwardNetwork(*dims, device=device)
-    qnet_target = FeedForwardNetwork(*dims, device=device)
+    model = FeedForwardNetwork(*dims, device=device)
     criterion = torch.nn.SmoothL1Loss()
 
     if not isinstance(args.agent, str):
@@ -128,8 +127,7 @@ if __name__ == '__main__':
     else:
         AgentClass = get_agent_class(args.agent)
         agent = AgentClass(
-            local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
-            criterion=criterion
+            model=model, device=device, action_space=env.action_space.n, criterion=criterion,
         )
 
     if args.log:

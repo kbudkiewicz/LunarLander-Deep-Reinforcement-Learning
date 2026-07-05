@@ -42,9 +42,7 @@ if __name__ == '__main__':
     # import the latest model
     latest = max(latest_version, key=lambda x: int(x.version))
     model_uri = f"models:/qnet_local/{latest.version}"
-    qnet_local = mlflow.pytorch.load_model(model_uri=model_uri, device=device)
-    model_uri = f"models:/qnet_target/{latest.version}"
-    qnet_target = mlflow.pytorch.load_model(model_uri=model_uri, device=device)
+    model = mlflow.pytorch.load_model(model_uri=model_uri, device=device)
 
     if not isinstance(args.agent, str):
         raise ValueError("Agent must be a string.")
@@ -52,8 +50,7 @@ if __name__ == '__main__':
         AgentClass = get_agent_class(args.agent)
         # TODO: check if the agent fits the chosen environment (continuous or discrete)
         agent = AgentClass(
-            local=qnet_local, target=qnet_target, device=device, action_space=env.action_space.n,
-            criterion=None
+            model=model, device=device, action_space=env.action_space.n, criterion=None
         )
         agent.zero_epsilon()
 
