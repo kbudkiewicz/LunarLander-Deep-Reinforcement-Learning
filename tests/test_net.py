@@ -5,7 +5,7 @@ import numpy as np
 from typing import Callable, Tuple
 from torch import Tensor
 from torch.nn import Module
-from nn import FeedForwardNetwork, DuelingQNetwork
+from nn import FeedForwardNetwork, DuelingQNetwork, PolicyNetwork
 
 
 class BaseNetworkTest:
@@ -30,8 +30,13 @@ class BaseNetworkTest:
         raise NotImplementedError
 
     @pytest.fixture
-    def model(self, build_model, dims, device) -> Module:
-        return build_model(*dims, device=device)
+    def model_kwargs(self) -> dict:
+        """Additional model kwargs."""
+        return {}
+
+    @pytest.fixture
+    def model(self, build_model, dims, device, model_kwargs) -> Module:
+        return build_model(*dims, device=device, **model_kwargs)
 
     @staticmethod
     def assert_model_output(x: Tensor, batch_size: int, action_space: int, is_batched: bool = True):
@@ -43,13 +48,13 @@ class BaseNetworkTest:
             assert x.shape == (1, action_space)
 
     @staticmethod
-    def test_init_invalid_dims(dims_invalid, build_model, device):
+    def test_init_invalid_dims(dims_invalid, build_model, device, model_kwargs):
         with pytest.raises(ValueError):
-            build_model(*dims_invalid, device=device)
+            build_model(*dims_invalid, device=device, **model_kwargs)
 
     @staticmethod
-    def test_init_valid_dims(dims, build_model, device):
-        net = build_model(*dims, device=device)
+    def test_init_valid_dims(dims, build_model, device, model_kwargs):
+        net = build_model(*dims, device=device, **model_kwargs)
         assert isinstance(net, Module)
 
     def test_forward_batched(self, model, state_space, action_space, batch_size, device):
@@ -138,3 +143,58 @@ class TestDuelingQNetwork(BaseNetworkTest):
         def _make(*args, **kwargs):
             return DuelingQNetwork(*args, **kwargs)
         return _make
+
+
+class TestPolicyNetwork(BaseNetworkTest):
+    @pytest.fixture(
+        params=[(4, 1, 8), (4, 8), (4, 128, 128, 8)],
+        ids=["minimal", "no_hidden_dimension", "normal"]
+    )
+    def dims(self, request) -> Tuple[int, ...]:
+        """Set of valid model dimensions"""
+        return request.param
+
+    @pytest.fixture(
+        params=[(0,), (1,), (0, 1, 8), (4, 1, 0)],
+        ids=["zero_dimension", "single_dimension", "zero_dimension_in", "zero_dimension_out"]
+    )
+    def dims_invalid(self, request) -> Tuple[int, ...]:
+        """Set of invalid model dimensions"""
+        return request.param
+
+    @pytest.fixture(params=[True, False], ids=['categorical', 'continuous'])
+    def categorical(self, request) -> Tuple[bool, ...]:
+        return request.param
+
+    @pytest.fixture
+    def model_kwargs(self, categorical) -> dict:
+        return {'categorical': categorical}
+
+    @pytest.fixture
+    def model(self, build_model, dims, device, model_kwargs) -> Module:
+        return build_model(*dims, device=device, **model_kwargs)
+
+    @pytest.fixture(scope="class")
+    def build_model(self) -> Callable[..., PolicyNetwork]:
+        def _make(*args, **kwargs):
+            return PolicyNetwork(*args, **kwargs)
+        return _make
+
+    def test_forward_batched(self, model, state_space, action_space, batch_size, device):
+        x = torch.randn(batch_size, state_space).to(device=device)
+        model.to(device)
+        action, log_prob = model.forward(x, probs=True)
+        assert isinstance(action, Tensor)
+        assert torch.isfinite(action).all()
+        expected_shape = (batch_size,) if model.categorical else (batch_size, action_space)
+        assert action.shape == expected_shape
+        assert log_prob is not None
+        assert log_prob.shape == (batch_size,)
+
+    def test_forward_single(self, model, state_space, action_space, device):
+        x = torch.randn(1, state_space).to(device=device)
+        model.to(device)
+        action, log_prob = model.forward(x, probs=True)
+        assert isinstance(action, Tensor)
+        expected_shape = (1,) if model.categorical else (1, action_space)
+        assert action.shape == expected_shape

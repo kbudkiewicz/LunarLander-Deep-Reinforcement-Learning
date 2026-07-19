@@ -7,16 +7,20 @@ import torch.nn as nn
 import numpy as np
 
 from abc import ABC, abstractmethod
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 from torch import Tensor
+from torch.optim.lr_scheduler import LRScheduler, ExponentialLR
 from collections import deque, namedtuple
-from nn import DuelingQNetwork
+from nn import DuelingQNetwork, PolicyNetwork
 
 __all__ = [
     'ReplayMemory',
     'DeepQNetwork',
     'DoubleDQN',
     'DuelingDQN',
+    'ValueAgent',
+    'PolicyAgent',
+    'DDPG',
 ]
 
 
@@ -26,9 +30,10 @@ memory = namedtuple('Memory', ('s', 'a', 'r', 'next_s', 'term'))
 class ReplayMemory(object):
     """Replay Memory class as described in `Human-level control through deep reinforcement learning
     <https://www.nature.com/articles/nature14236>`_."""
-    def __init__(self, memory_size: int, batch_size: int):
+    def __init__(self, memory_size: int, batch_size: int, continuous: bool = False):
         self.memory = deque(maxlen=memory_size)
         self.batch_size = batch_size
+        self.continuous = continuous
 
     def remember(self, *args) -> None:
         self.memory.append(memory(*args))
@@ -40,7 +45,10 @@ class ReplayMemory(object):
         rewards = torch.tensor(rewards, device=device, dtype=torch.float)
         states_new = torch.tensor(states_new, device=device, dtype=torch.float)
         flags = torch.tensor(flags, device=device, dtype=torch.long)
-        actions = torch.tensor(actions, device=device, dtype=torch.long).unsqueeze(1)
+        if self.continuous:
+            actions = torch.tensor(actions, device=device, dtype=torch.float)
+        else:
+            actions = torch.tensor(actions, device=device, dtype=torch.long).unsqueeze(1)
 
         return states, actions, rewards, states_new, flags
 
@@ -338,3 +346,82 @@ class DuelingDQN(Agent):
 
         return loss, grad_norm
 
+
+class DDPG(PolicyAgent):
+    """Deep Deterministic Policy Gradient (DDPG) Agent based on
+    `Continuous Control with Deep Reinforcement Learning <https://arxiv.org/abs/1509.02971>`_."""
+    def __init__(
+        self,
+        actor: PolicyNetwork,
+        critic: torch.nn.Module,
+        device: torch.device,
+        criterion: torch.nn.Module,
+        action_space: int,
+        replay_memory_size: int = int(1e6),
+        noise_range: Tuple[float, float] = (0.20, 0.005),
+        noise_term: int = 400,
+        **kwargs,
+    ):
+        self.noise_start, self.noise_end = noise_range
+        self.noise_scale = self.noise_start
+        self.noise_term = noise_term
+
+        super().__init__(
+            actor=actor,
+            critic=critic,
+            device=device,
+            criterion=criterion,
+            action_space=action_space,
+            replay_memory_size=replay_memory_size,
+            continuous=True,
+            **kwargs
+        )
+
+    def __call__(self, observation: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            observation = torch.from_numpy(observation).to(self.device)
+            action = self.actor(observation)
+            if self.noise_scale > 0:
+                action += self.noise_scale * torch.randn_like(action)
+            action = self._rescale_action(action)
+            return action
+
+    def update_noise(self, epoch: int) -> None:
+        r"""Calculates a new noise gain for each successive epoch following a predefined rate schedule."""
+        slope = (self.noise_end - self.noise_start) / self.noise_term
+        noise_new = slope * epoch + self.noise_start
+        self.noise_scale = max(self.noise_end, noise_new)
+
+    def actor_loss(self, state: Tensor) -> Tuple[float, float]:
+        self.actor_optimizer.zero_grad()
+        actions = self.actor(state)
+        actions = self._rescale_action(actions, is_tensor=True)
+        state_action_pair = torch.hstack((state, actions))
+
+        self.critic.requires_grad_(False)
+        loss = -self.critic(state_action_pair).mean()
+        loss.backward()
+        self.critic.requires_grad_(True)
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.max_norm)
+        self.actor_optimizer.step()
+        return loss.item(), grad_norm.item()
+
+    def update_net(self) -> Tuple[float, float, float]:
+        state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
+
+        with torch.no_grad():
+            action_new = self.actor_target(state_new)
+            action_new = self._rescale_action(action_new, is_tensor=True)
+            state_action_pair_new = torch.hstack((state_new, action_new))
+
+            q = self.critic_target(state_action_pair_new).squeeze(-1)
+            q_target = reward + self.gamma * q * (1 - flags)
+
+        state_action_pair = torch.hstack((state, action))
+        q_local = self.critic(state_action_pair).squeeze(-1)
+        critic_loss, critic_grad_norm, actor_loss, actor_grad_norm = self.backpropagate(
+            value=q_local, value_target=q_target, state=state
+        )
+
+        return critic_loss, critic_grad_norm, q_local.mean().item()

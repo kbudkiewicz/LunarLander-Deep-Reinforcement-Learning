@@ -1,15 +1,18 @@
 import torch
 import torch.nn as nn
 
-from typing import Tuple
+from typing import Tuple, Optional, Union
 from itertools import pairwise
 from torch import Tensor
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
 
 
 __all__ = [
     'LinearBlock',
     'FeedForwardNetwork',
     'DuelingQNetwork',
+    'PolicyNetwork',
 ]
 
 
@@ -41,6 +44,7 @@ class FeedForwardNetwork(nn.Module):
         device: torch.device,
         activation: nn.Module = nn.ReLU,
         normalization: nn.Module = nn.LayerNorm,
+        output_activation: Optional[type[nn.Module]] = None,
     ):
         super().__init__()
         if len(dims) < 2:
@@ -52,7 +56,7 @@ class FeedForwardNetwork(nn.Module):
         self.net = nn.Sequential()
         for idx, (in_dim, out_dim) in enumerate(pairwise(dims)):
             if idx == len(dims) - 2:
-                activation = nn.Identity
+                activation = nn.Identity if output_activation is None else output_activation
                 normalization = nn.Identity
             self.net.append(
                 LinearBlock(in_dim, out_dim, activation=activation, normalization=normalization)
@@ -149,3 +153,78 @@ class DuelingQNetwork(nn.Module):
         return sum(
             net.parameter_count for net in (self.encoder, self.value_approximator, self.advantage_approximator)
         )
+
+
+class PolicyNetwork(nn.Module):
+    def __init__(
+        self,
+        *dims,
+        activation: nn.Module = nn.ReLU,
+        normalization: nn.Module = nn.LayerNorm,
+        device: torch.device,
+        output_activation: type[nn.Module] = nn.Tanh,
+        categorical: bool,
+        deterministic: bool = False,
+    ):
+        super().__init__()
+        if len(dims) < 2:
+            raise ValueError("Need at least 2 dimensions to build a minimal model.")
+        if any(d < 1 for d in dims):
+            raise ValueError("Model dimensions must be strictly positive.")
+
+        self.net = FeedForwardNetwork(
+            *dims, activation=activation, normalization=normalization, device=device, output_activation=output_activation
+        )
+        self.device = device
+        self.categorical = categorical
+        self.deterministic = deterministic
+
+        if not categorical:
+            _action_space = dims[-1]
+            self.log_std = torch.nn.Parameter(-0.5 * torch.ones(_action_space, dtype=torch.float32, device=device))
+            del _action_space
+
+    def forward(
+        self,
+        x: Tensor,
+        probs: bool = False,
+        action: Optional[Tensor] = None
+    ) -> Union[Tensor, Tuple[Tensor, Tensor]]:
+        """Approximate action logits given an environment observation.
+
+        If the network is categorical (as defined by ``self.categorical``), it approximates the logits of each action,
+        and the action is subsequently sampled from a multimodal distribution using those logits. Otherwise, the mean of
+        a Gaussian is approximated and the action sampled from the Gaussian distribution.
+
+        .. Args::
+            - x (Tensor): A batch of observations.
+            - probs (bool): If ``True``, the action logits are probabilities.
+            - action (Tensor, optional): A batch of actions.
+        """
+        if self.categorical:
+            logits = self.net(x)
+            pi = Categorical(logits=logits)
+            if action is None:
+                action = pi.rsample()
+            if probs:
+                return action, pi.log_prob(action)
+            return action.unsqueeze(-1)
+        else:
+            mu = self.net(x)
+            if self.deterministic:
+                return mu
+            std = torch.exp(self.log_std)
+            pi = Normal(mu, std)
+            if action is None:
+                action = pi.rsample()
+            if probs:
+                return action, pi.log_prob(action).sum(dim=-1)
+            return action
+
+    @property
+    def model_type(self) -> str:
+        return self.__class__.__name__
+
+    @property
+    def parameter_count(self) -> int:
+        return sum(p.numel() for p in self.net.parameters())
