@@ -104,11 +104,12 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--agent', type=str, required=True)
     argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(128, 128, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
-    argparser.add_argument('-L', '--log', type=bool, default=True)
+    argparser.add_argument('-L', '--log', action=argparse.BooleanOptionalAction, default=True)
     argparser.add_argument('--uri', type=str, default=None)
     argparser.add_argument('--experiment-name', type=str, default='LunarLander-v3')
     argparser.add_argument('--max-episode-steps', type=int, default=800)
-    argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction)
+    argparser.add_argument('--log-system-metrics', action=argparse.BooleanOptionalAction, default=True)
+    argparser.add_argument('--continuous', action=argparse.BooleanOptionalAction, default=False)
     args = argparser.parse_args()
 
     # initialize
