@@ -16,9 +16,8 @@ from tqdm import tqdm
 
 # Internal
 from agent import *
-from nn import FeedForwardNetwork
 from plotting import plot_loss_curve, unpack_metric_histories
-from utils import get_nvml_info, get_git_info, get_module_info, get_agent_class
+from utils import get_nvml_info, get_git_info, get_module_info, build_agent
 from mlflow.models.signature import infer_signature
 
 
@@ -27,6 +26,7 @@ def train(
     env: gym.Env,
     epochs: int,
     max_episode_steps: int,
+    target_score: float = 200.,
 ) -> Tuple[bool, float]:
     """Train a reinforcement learning agent in a gym environment.
 
@@ -47,24 +47,34 @@ def train(
         for _ in range(max_episode_steps):
             action = agent(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
-            loss, grad_norm = agent.memorize(state, action, reward, next_state, terminated)
+            loss, grad_norm, q_value = agent.memorize(state, action, reward, next_state, terminated)
             state = next_state
             score += reward
             if terminated or truncated:
                 break
 
-        agent.update_epsilon(epoch=epoch)
+        if isinstance(agent, DDPG):
+            agent.update_noise(epoch=epoch)
+            mlflow.log_metric('noise_scale', agent.noise_scale, step=epoch)
+        if isinstance(agent, PolicyAgent):
+            mlflow.log_metric('lr.actor', agent.lr_actor, step=epoch)
+            mlflow.log_metric('lr.critic', agent.lr_critic, step=epoch)
+        else:
+            agent.update_epsilon(epoch=epoch)
+            mlflow.log_metric('epsilon', agent.epsilon, step=epoch)
+            mlflow.log_metric('lr', agent.lr, step=epoch)
         moving_score.append(score)
         average_score = np.mean(moving_score)
         epochs_.set_postfix(average_score=f'{average_score:.2f}')
 
-        mlflow.log_metric('metric.total_score', score, step=epoch)
-        mlflow.log_metric('metric.average_score', np.mean(moving_score), step=epoch)
+        mlflow.log_metric('total_score', score, step=epoch)
+        mlflow.log_metric('average_score', np.mean(moving_score), step=epoch)
         if isinstance(loss, float):
             mlflow.log_metric('loss', loss, step=epoch)
             mlflow.log_metric('grad_norm', grad_norm, step=epoch)
+            mlflow.log_metric('q_value', q_value, step=epoch)
 
-        if average_score >= 200.0:
+        if average_score >= target_score:
             logger.info(f'Environment within {epoch} epochs.')
             return True, epoch
 
@@ -100,6 +110,7 @@ def evaluate_agent(agent, env: gym.Env, epochs: int = 20, max_episode_steps: int
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
+    argparser.add_argument('-a', '--agent', type=str)
     argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
     argparser.add_argument('-a', '--agent', type=str, required=True)
     argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(128, 128, 64), required=False)
@@ -118,18 +129,12 @@ if __name__ == '__main__':
     else:
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps)
-    dims = (*env.observation_space.shape, *args.dims, env.action_space.n)
-    model = FeedForwardNetwork(*dims, device=device)
-    criterion = torch.nn.SmoothL1Loss()
 
-    if not isinstance(args.agent, str):
-        raise ValueError("Agent must be a string.")
-    else:
-        AgentClass = get_agent_class(args.agent)
-        agent = AgentClass(
-            model=model, device=device, action_space=env.action_space.n, criterion=criterion,
-        )
+    env = gym.make(args.experiment_name, max_episode_steps=args.max_episode_steps, continuous=args.continuous)
+    criterion = torch.nn.SmoothL1Loss()
+    agent, action_space = build_agent(
+        args.agent, environment=env, model_dims=args.dims, device=device, criterion=criterion
+    )
 
     if args.log:
         logger = logging.getLogger()
@@ -153,9 +158,17 @@ if __name__ == '__main__':
 
         # model params
         model_input, _ = env.reset()
-        model_output = np.empty([env.action_space.n], dtype=np.float32)
-        mlflow.log_param('net.type', agent.target.model_type)
-        mlflow.log_param('net.param_count', agent.target.parameter_count)
+        model_output = np.empty([action_space], dtype=np.float32)
+        if isinstance(agent, PolicyAgent):
+            mlflow.log_param('net.actor.type', agent.actor.model_type)
+            mlflow.log_param('net.critic.type', agent.critic.model_type)
+            mlflow.log_param('net.actor.param_count', agent.actor.parameter_count)
+            mlflow.log_param('net.critic.param_count', agent.critic.parameter_count)
+        elif isinstance(agent, (DeepQNetwork, DoubleDQN, DuelingDQN)):
+            mlflow.log_param('net.type', agent.local.model_type)
+            mlflow.log_param('net.param_count', agent.local.parameter_count)
+        else:
+            raise ValueError("Unknown Agent class was provided. Aborting run.")
         mlflow.log_param('net.dims', args.dims)
         mlflow.log_param('net.layers', len(args.dims))
         mlflow.log_param('net.device', device)
@@ -195,22 +208,36 @@ if __name__ == '__main__':
         # previous agents
         if code:
             signature = infer_signature(model_input.astype(np.float32), model_output)
-            m_local = mlflow.pytorch.log_model(
-                agent.local, name='qnet_local', model_type=agent.local.model_type, signature=signature
-            )
-            m_target = mlflow.pytorch.log_model(
-                agent.target, name='qnet_target', model_type=agent.target.model_type, signature=signature
-            )
+            if issubclass(agent.__class__, PolicyAgent):
+                m_actor = mlflow.pytorch.log_model(
+                    agent.actor, name='actor', model_type=agent.actor.model_type, signature=signature
+                )
+                m_critic = mlflow.pytorch.log_model(
+                    agent.critic, name='critic', model_type=agent.critic.model_type, signature=signature
+                )
+            elif isinstance(agent, (DeepQNetwork, DoubleDQN, DuelingDQN)):
+                m_local = mlflow.pytorch.log_model(
+                    agent.local, name='qnet_local', model_type=agent.local.model_type, signature=signature
+                )
+                m_target = mlflow.pytorch.log_model(
+                    agent.local, name='qnet_target', model_type=agent.target.model_type, signature=signature
+                )
             eval_score = evaluate_agent(agent=agent, env=env)
             runs = mlflow.search_runs(
                 run.info.experiment_id, filter_string=f'metrics.eval_score > {eval_score:.2f}',
                 order_by=['metrics.eval_score'], search_all_experiments=False,
             )
-            logging.info(f'Evaluation done. Achieved score {eval_score:.2f}')
+            logging.info(f'Evaluation done. Achieved an average score of {eval_score:.2f}.')
             if len(runs) == 0:
-                logging.info(f'No better model found. Registering {m_local.model_uri} to model registry.')
-                result = mlflow.register_model(m_local.model_uri, 'qnet_local')
-                result = mlflow.register_model(m_target.model_uri, 'qnet_target')
+                logging.info(f'No better model found.')
+                if issubclass(agent.__class__, PolicyAgent):
+                    logging.info(f'Registering actor {m_actor.model_uri} to model registry.')
+                    mlflow.register_model(m_actor.model_uri, 'actor')
+                    logging.info(f'Registering critic {m_critic.model_uri} to model registry.')
+                    mlflow.register_model(m_critic.model_uri, 'critic')
+                else:
+                    logging.info(f'Registering local {m_local.model_uri} to model registry.')
+                    result = mlflow.register_model(m_local.model_uri, 'qnet_local')
             else:
                 print(f'The following runs already contain better models: {runs}')
 

@@ -238,7 +238,7 @@ class DeepQNetwork(Agent):
             **kwargs
         )
 
-    def update_net(self) -> Tuple[float, float]:
+    def update_net(self) -> Tuple[float, float, float]:
         state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
 
         with torch.no_grad():
@@ -246,7 +246,7 @@ class DeepQNetwork(Agent):
         q_local = self.local(state).gather(1, action).squeeze()
         loss, grad_norm = self.backpropagate(q_local, q_target)
 
-        return loss, grad_norm
+        return loss, grad_norm, q_local.mean().item()
 
 
 class DoubleDQN(Agent):
@@ -269,7 +269,7 @@ class DoubleDQN(Agent):
             **kwargs
         )
 
-    def update_net(self) -> Tuple[float, float]:
+    def update_net(self) -> Tuple[float, float, float]:
         """Perform soft parameter update based on a sample from replay memory.
 
         The Q-value is approximated via a local and a target network parametrized by respectively :math:`\Theta_t` and
@@ -287,7 +287,7 @@ class DoubleDQN(Agent):
         q_local = self.local(state).gather(1, action).squeeze()
         loss, grad_norm = self.backpropagate(q_local, q_target)
 
-        return loss, grad_norm
+        return loss, grad_norm, q_local.mean().item()
 
 
 class DuelingDQN(Agent):
@@ -320,7 +320,7 @@ class DuelingDQN(Agent):
         )
         self.use_double = use_double
 
-    def update_net(self) -> Tuple[float, float]:
+    def update_net(self) -> Tuple[float, float, float]:
         """Perform soft parameter update based on a sample from replay memory.
 
         If ``use_double`` is ``True``, then the Q-value target is defined as:
@@ -344,7 +344,7 @@ class DuelingDQN(Agent):
         q_local = self.local(state).gather(1, action).squeeze()
         loss, grad_norm = self.backpropagate(q_local, q_target)
 
-        return loss, grad_norm
+        return loss, grad_norm, q_local.mean().item()
 
 
 class DDPG(PolicyAgent):
