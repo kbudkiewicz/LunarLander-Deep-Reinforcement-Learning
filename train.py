@@ -215,7 +215,7 @@ if __name__ == '__main__':
                 m_critic = mlflow.pytorch.log_model(
                     agent.critic, name='critic', model_type=agent.critic.model_type, signature=signature
                 )
-            elif isinstance(agent, (DeepQNetwork, DoubleDQN, DuelingDQN)):
+            elif issubclass(agent.__class__, ValueAgent):
                 m_local = mlflow.pytorch.log_model(
                     agent.local, name='qnet_local', model_type=agent.local.model_type, signature=signature
                 )
