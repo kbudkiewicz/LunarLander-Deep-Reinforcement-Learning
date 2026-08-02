@@ -53,7 +53,7 @@ def train(
             if terminated or truncated:
                 break
 
-        if isinstance(agent, DDPG):
+        if isinstance(agent, (DDPG, TD3)):
             agent.update_noise(epoch=epoch)
             mlflow.log_metric('noise_scale', agent.noise_scale, step=epoch)
         if isinstance(agent, PolicyAgent):
@@ -112,8 +112,7 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-a', '--agent', type=str)
     argparser.add_argument('-e', '--epochs', type=int, default=1, required=False)
-    argparser.add_argument('-a', '--agent', type=str, required=True)
-    argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(128, 128, 64), required=False)
+    argparser.add_argument('-d', '--dims', type=int, nargs='+', default=(64, 64, 64), required=False)
     argparser.add_argument('-D', '--device', type=str)
     argparser.add_argument('-L', '--log', action=argparse.BooleanOptionalAction, default=True)
     argparser.add_argument('--uri', type=str, default=None)

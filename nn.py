@@ -228,3 +228,25 @@ class PolicyNetwork(nn.Module):
     @property
     def parameter_count(self) -> int:
         return sum(p.numel() for p in self.net.parameters())
+
+
+class DoubledNetwork(nn.Module):
+    def __init__(self, base: nn.Module):
+        super().__init__()
+        self.net_1 = base
+        self.net_2 = base
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        return self.net_1(x), self.net_2(x)
+
+    def q1(self, x: Tensor) -> Tensor:
+        return self.net_1(x)
+
+    @property
+    def model_type(self) -> str:
+        return self.__class__.__name__
+
+    def parameter_count(self) -> int:
+        return sum(
+            net.parameter_count for net in (self.net_1, self.net_2)
+        )

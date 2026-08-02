@@ -8,7 +8,7 @@ from typing import Tuple
 from git import Repo
 from torch.nn import Module
 
-from agent import Agent, ValueAgent, PolicyAgent, DuelingDQN, DDPG
+from agent import *
 from nn import FeedForwardNetwork, DuelingQNetwork, PolicyNetwork
 
 
@@ -81,20 +81,24 @@ def build_agent(
         observation_space, action_space = get_environment_dimensions(environment)
         dims = (observation_space, *model_dims, action_space)
 
-        if issubclass(agent_class, DDPG):
+        if issubclass(agent_class, (DDPG, TD3)):
             action_range = environment.action_space.low, environment.action_space.high
             actor = PolicyNetwork(*dims, device=device, categorical=False, deterministic=True)
             dims = (observation_space + action_space, *model_dims, 1)
             critic = FeedForwardNetwork(*dims, device=device)
-            agent = agent_class(
-                actor=actor,
-                critic=critic,
-                device=device,
-                action_space=action_space,
-                action_range=action_range,
-                criterion=criterion,
-                categorical=False,
-            )
+
+            if issubclass(agent_class, DDPG):
+                agent_kwargs = dict(
+                    actor=actor, critic=critic, device=device, action_space=action_space, action_range=action_range,
+                    criterion=criterion, categorical=False
+                )
+            elif issubclass(agent_class, TD3):
+                agent_kwargs = dict(
+                    actor=actor, critic=critic, device=device, action_space=action_space, action_range=action_range,
+                    criterion=criterion, categorical=False, noise_clip=0.5
+                )
+
+            agent = agent_class(**agent_kwargs)
         elif issubclass(agent_class, DuelingDQN):
             agent = agent_class(
                 model=DuelingQNetwork(*dims, device=device),

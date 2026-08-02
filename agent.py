@@ -11,9 +11,10 @@ from typing import Union, Tuple, Optional
 from torch import Tensor
 from torch.optim.lr_scheduler import LRScheduler, ExponentialLR
 from collections import deque, namedtuple
-from nn import DuelingQNetwork, PolicyNetwork
+from nn import DuelingQNetwork, PolicyNetwork, DoubledNetwork
 
 __all__ = [
+    'Agent',
     'ReplayMemory',
     'DeepQNetwork',
     'DoubleDQN',
@@ -21,6 +22,7 @@ __all__ = [
     'ValueAgent',
     'PolicyAgent',
     'DDPG',
+    'TD3',
 ]
 
 
@@ -667,3 +669,111 @@ class DDPG(PolicyAgent):
         )
 
         return critic_loss, critic_grad_norm, q_local.mean().item()
+
+
+class TD3(DDPG):
+    """Twin Delayed DDPG (TD3) agent based on `Addressing Function Approximation Error in Actor-Critic Methods
+    <https://arxiv.org/abs/1802.09477>`_."""
+    def __init__(
+        self,
+        actor: PolicyNetwork,
+        critic: torch.nn.Module,
+        device: torch.device,
+        criterion: torch.nn.Module,
+        action_space: int,
+        noise_range: Tuple[float, float] = (0.20, 0.005),
+        noise_term: int = 400,
+        noise_clip: float = 0.5,
+        **kwargs,
+    ):
+        super().__init__(
+            actor=actor,
+            critic=DoubledNetwork(critic),
+            device=device,
+            criterion=criterion,
+            action_space=action_space,
+            noise_range=noise_range,
+            noise_term=noise_term,
+            **kwargs
+        )
+        if not isinstance(noise_clip, float) or not noise_clip > 0:
+            raise ValueError("The noise clip value must be a strictly positive float.")
+
+        self.noise_clip = noise_clip
+
+    def __call__(self, observation: np.ndarray) -> np.ndarray:
+        with torch.no_grad():
+            observation = torch.from_numpy(observation).to(self.device)
+            action = self.actor(observation)
+            if self.noise_scale > 0:
+                action += self.noise_scale * self.sample_noise(action)
+            action = self._rescale_action(action)
+            return action
+
+    def sample_noise(self, action: Tensor) -> Tensor:
+        """Sample a clipped noise from a Gaussian distribution.
+
+        .. Returns::
+            A noise (Tensor) with the shape of ``action`` and clipped between ``noise_clip``.
+        """
+        return torch.randn_like(action).clamp(-self.noise_clip, self.noise_clip)
+
+    def critic_loss(self, inputs: Tuple[Tensor, Tensor], target: Tensor) -> Tuple[float, float]:
+        """Calculate the loss and the gradient norm for both critics."""
+        self.critic_optimizer.zero_grad()
+        input_1, input_2 = inputs
+        loss = self.criterion(input_1, target) + self.criterion(input_2, target)
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.max_norm)
+        self.critic_optimizer.step()
+        if isinstance(self.critic_scheduler, LRScheduler):
+            self.critic_scheduler.step()
+            self.lr_critic = self.critic_scheduler.get_last_lr()[0]
+        return loss.item(), grad_norm.item()
+
+    def actor_loss(self, state: Tensor) -> Tuple[float, float]:
+        self.actor_optimizer.zero_grad()
+        actions = self.actor(state)
+        actions = actions + self.sample_noise(actions)
+        actions = self._rescale_action(actions, is_tensor=True)
+        state_action_pair = torch.hstack((state, actions))
+
+        self.critic.requires_grad_(False)
+        loss = -self.critic.q1(state_action_pair).mean()
+        loss.backward()
+        self.critic.requires_grad_(True)
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.max_norm)
+        self.actor_optimizer.step()
+        return loss.item(), grad_norm.item()
+
+    def backpropagate(
+        self, values: Tuple[Tensor, Tensor], value_target: Tensor, state: Tensor
+    ) -> Tuple[float, float, float, float]:
+        """Calculate the loss and backpropagate it through the actor and critic."""
+        critic_loss, critic_grad_norm = self.critic_loss(values, value_target)
+        actor_loss, actor_grad_norm = self.actor_loss(state)
+        self.update_weights()
+        return critic_loss, critic_grad_norm, actor_loss, actor_grad_norm
+
+    def update_net(self) -> Tuple[float, float, float]:
+        """Perform a twin-delayed Q-value update."""
+        state, action, reward, state_new, flags = self.memory.get_sample(device=self.device)
+
+        with torch.no_grad():
+            action_new = self.actor_target(state_new)
+            action_new = action_new + self.sample_noise(action_new)
+            action_new = self._rescale_action(action_new, is_tensor=True)
+            state_action_pair_new = torch.hstack((state_new, action_new))
+
+            q_target_1, q_target_2 = self.critic_target(state_action_pair_new)
+            q_target = reward + self.gamma * torch.min(q_target_1.squeeze(-1), q_target_2.squeeze(-1)) * (1 - flags)
+
+        state_action_pair = torch.hstack((state, action))
+        q_local_1, q_local_2 = self.critic(state_action_pair)
+        q_local_1, q_local_2 = q_local_1.squeeze(-1), q_local_2.squeeze(-1)
+        critic_loss, critic_grad_norm, actor_loss, actor_grad_norm = self.backpropagate(
+            values=(q_local_1, q_local_2), value_target=q_target, state=state
+        )
+
+        return critic_loss, critic_grad_norm, torch.mean(torch.hstack([q_local_1, q_local_2])).item()

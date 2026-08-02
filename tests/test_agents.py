@@ -6,7 +6,7 @@ import numpy as np
 from typing import Tuple, Union
 from torch.nn import Module
 from nn import FeedForwardNetwork, DuelingQNetwork, PolicyNetwork
-from agent import Agent, DeepQNetwork, DoubleDQN, DuelingDQN, DDPG
+from agent import Agent, DeepQNetwork, DoubleDQN, DuelingDQN, DDPG, TD3
 
 
 class BaseAgentTest:
@@ -250,4 +250,54 @@ class TestDDPG(PolicyAgentTest):
             categorical=categorical,
             replay_memory_size=replay_memory_size,
         )
+
+
+class TestTD3(TestDDPG):
+    @pytest.fixture(params=[0.1, 1.1, 1e8], ids=["below_one", "over_one", "big_float"])
+    def noise_clip(self, request) -> float:
+        return request.param
+
+    @pytest.fixture(params=[-0.1, 0., 2, -3], ids=["negative_float", "zero", "positive_int", "negative_int"])
+    def noise_clip_invalid(self, request) -> Union[float, int]:
+        return request.param
+
+    @pytest.fixture()
+    def agent(
+        self, actor, critic, criterion, action_space, device, categorical, replay_memory_size, action_range, noise_clip
+    ):
+        return TD3(
+            actor=actor,
+            critic=critic,
+            criterion=criterion,
+            action_space=action_space,
+            action_range=action_range,
+            device=device,
+            categorical=categorical,
+            replay_memory_size=replay_memory_size,
+            noise_clip=noise_clip,
+        )
+
+    def test_build_invalid_agent(
+        self, actor, critic, criterion, action_space, device, categorical, replay_memory_size, action_range,
+        noise_clip_invalid
+    ):
+        with pytest.raises(ValueError):
+            return TD3(
+                actor=actor,
+                critic=critic,
+                criterion=criterion,
+                action_space=action_space,
+                action_range=action_range,
+                device=device,
+                categorical=categorical,
+                replay_memory_size=replay_memory_size,
+                noise_clip=noise_clip_invalid,
+            )
+
+    def test_noise_is_in_range(self, agent: TD3, action_space, noise_clip) -> None:
+        action = torch.randn(action_space)
+        noise = agent.sample_noise(action)
+        assert isinstance(noise, torch.Tensor)
+        assert action.shape == noise.shape, "Action and noise shape do not match."
+        assert torch.all((-noise_clip <= noise) & (noise <= noise_clip))
 
